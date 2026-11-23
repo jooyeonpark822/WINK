@@ -25,18 +25,25 @@
 
 ## 2. 영역과 담당 (파일 기준)
 
-담당자 이름은 정해지면 채운다.
+담당은 레인(작업 묶음) 단위로 나눈다. 담당 칸의 `lane-X`는 아래 "작업 현황"의 레인이다. 담당자는 바뀔 수 있다.
 
 | 영역 | 종류 | 폴더 / 파일 | 담당 |
 |---|---|---|---|
-| 브릿지 | 보드에 올리는 코드 | `firmware/bridge/` | (미정) |
-| 안경 | 보드에 올리는 코드 | `firmware/glasses/` | (미정) |
+| 브릿지 | 보드에 올리는 코드 | `firmware/bridge/` | `fernwehs` (lane-C) |
+| 안경 | 보드에 올리는 코드 | `firmware/glasses/` | `fernwehs` (lane-C) |
 | 컨트롤러 | 보드에 올리는 코드 | `firmware/controller/` | (미정) |
-| 서보 | 보드에 올리는 코드 | `firmware/servo/` | (미정) |
-| 서버 | 노트북 서버 코드 | `server/*.js`, `server/*.py` | (미정) |
-| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/partner.js`, `server/coaching.js` | (미정) |
-| 웹 화면 | 웹 화면 코드 | `server/public/index.html` | (미정) |
+| 서보 | 보드에 올리는 코드 | `firmware/servo/` | `jooyeonpark822` (lane-B) |
+| 서버 | 노트북 서버 코드 | `server/*.js`, `server/*.py` | (미정). 단 lane 작업에 쓰는 파일은 아래 표를 따른다 |
+| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/partner.js`, `server/coaching.js` | `sangheon03` (lane-A) |
+| 웹 화면 | 웹 화면 코드 | `server/public/index.html` | (미정). 서보 시험 버튼(#9)만 `jooyeonpark822` |
 | 호출어·모델 | 노트북 서버 코드 | `server/wakeword.py`, `server/wakeDetector.js`, `server/train_verifier.py`, `models/` | (미정) |
+
+서버 파일 중 lane 작업으로 맡은 것:
+
+| 파일 | 담당 | 이슈 |
+|---|---|---|
+| `server/servoSerial.js` (새 파일), `server/server.js` (`/servo/test` 경로만) | `jooyeonpark822` | #7, #8 |
+| `server/bridgeSerial.js`, `server/voiceSession.js`, `server/serialReader.py` (소리를 제품으로 보내는 부분만) | `fernwehs` | #15 |
 
 공용(바꾸면 양쪽이 같이 바뀌어야 하는 값)은 4장의 약속이다. 바꾸려면 먼저 팀에 알린다.
 
@@ -136,9 +143,32 @@
 - 커밋 메시지와 PR 설명은 한국어로 쓰고 이슈 번호를 붙인다. (예: `서보 말하는 동작 추가 (#3)`)
 - 보드에 올릴 때는 보드를 한 번에 하나만 USB에 연결한다.
 - 비밀번호와 API 키는 코드나 문서에 쓰지 않는다. (`server/.env`만 사용)
+- 이슈 제목은 `[A1]`처럼 레인 글자와 번호로 시작한다. 브랜치 이름은 `issue-번호-설명`으로 한다. (예: `issue-7-servo-serial`)
 
-## 7. 아직 정할 것
+## 7. 작업 현황
 
-- 팀원별 담당 영역(2장)
-- 새 GitHub 저장소 이름과 올릴 범위(폴더 이름을 `WINK`로 바꾼 뒤 결정)
-- 이슈 목록과 브랜치 이름 규칙
+GitHub 이슈: https://github.com/jooyeonpark822/WINK/issues
+
+이번 목표: ① AI 말투·대답 다듬기 ② 모터 돌리기 (먼저 웹 버튼으로 시험, 최종은 목소리 명령) ③ Gemini 목소리를 컴퓨터 웹이 아니라 제품(안경 보드 스피커)에서 내기.
+
+| 레인 | 목표 | 담당 | 이슈 |
+|---|---|---|---|
+| lane-A | AI 말투·대답 | `sangheon03` | #1~#5 |
+| lane-B | 모터 (웹 버튼 시험) | `jooyeonpark822` | #6~#10 |
+| lane-C | 제품에서 Gemini 소리 | `fernwehs` | #11~#16 |
+
+레인끼리는 같은 파일을 건드리지 않아 동시에 진행할 수 있다. 순서가 있는 것은 아래뿐이다.
+- 레인 안: 번호 순서(B2는 B1 뒤, C4와 C5는 C3 뒤, C6은 C2·C4·C5 뒤 등. 각 이슈의 "선행 이슈" 참고)
+- 레인 사이: "목소리로 모터" 이슈(`geminiLive.js` 수정, lane-A 파일)는 #10(B5) 뒤에 만든다.
+
+### 제안 중인 이름 (아직 확정 아님, 확정되면 해당 장으로 옮긴다)
+
+| 종류 | 이름 | 이슈 |
+|---|---|---|
+| 새 파일 | `server/servoSerial.js` | #7 |
+| 환경 변수 | `SERVO_PORT` | #7 |
+| HTTP 경로 | `POST /servo/test` | #8 |
+| 웹 화면 id | `servo-test` | #9 |
+| 소리 프레임 종류 | `4` (노트북 -> 안경, 24kHz 16비트 모노) | #13 |
+| 안경 스피커 핀 | 미정 | #11 |
+
