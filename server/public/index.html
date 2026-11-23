@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WINK</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 32px auto; padding: 0 16px; color: #222; }
+  h1 { margin: 0 0 4px; }
+  .sub { color: #777; font-size: 14px; margin-bottom: 20px; }
+  #status { display: flex; align-items: center; gap: 14px; padding: 18px; border-radius: 12px; background: #eee; transition: background .2s; }
+  #status .dot { width: 18px; height: 18px; border-radius: 50%; background: #aaa; flex: none; }
+  #status .label { font-size: 26px; font-weight: 700; }
+  #status.idle { background: #f0f0f0; }
+  #status.listening { background: #ffe9ec; }
+  #status.listening .dot { background: #e5334a; animation: pulse 1s infinite; }
+  #status.thinking { background: #fff6dd; }
+  #status.thinking .dot { background: #e6a700; animation: pulse 1s infinite; }
+  #status.answering { background: #e3f5e6; }
+  #status.answering .dot { background: #2da44e; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  #lamp { margin-top: 12px; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px; background: #f0f0f0; transition: background .2s; }
+  #lamp .dot { width: 14px; height: 14px; border-radius: 50%; background: #aaa; flex: none; transition: background .2s, box-shadow .2s; }
+  #lamp .text { font-size: 15px; color: #555; }
+  #lamp.heard { background: #e3f5e6; }
+  #lamp.heard .dot { background: #2da44e; box-shadow: 0 0 10px 3px #2da44e88; }
+  #lamp.heard .text { color: #176f2c; font-weight: 700; }
+  #lamp.button { background: #e8f0fe; }
+  #lamp.button .dot { background: #4c8bf5; box-shadow: 0 0 10px 3px #4c8bf588; }
+  #lamp.button .text { color: #2456b3; font-weight: 700; }
+  #lamp.waiting .dot { background: #e6a700; animation: pulse 1.6s infinite; }
+  #lamp.waiting { background: #fff9e8; }
+  .small { font-size: 13px; color: #777; margin-top: 6px; }
+  .box { margin-top: 16px; padding: 14px; border: 1px solid #ccc; border-radius: 8px; white-space: pre-wrap; min-height: 28px; }
+  .box h2 { margin: 0 0 6px; font-size: 13px; color: #777; font-weight: 600; }
+  .err { color: #c00; }
+  .row { display: flex; gap: 16px; align-items: flex-start; margin-top: 16px; flex-wrap: wrap; }
+  img#cam { width: 240px; border-radius: 8px; background: #eee; min-height: 90px; }
+  button { font-size: 15px; padding: 8px 16px; cursor: pointer; }
+  details { margin-top: 24px; }
+  .hist-head { display: flex; justify-content: space-between; align-items: center; margin-top: 28px; }
+  .hist-head h2 { margin: 0; font-size: 16px; }
+  .hist-head button { font-size: 13px; padding: 6px 12px; }
+  #history { margin-top: 10px; max-height: 360px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
+  #history .empty { color: #999; font-size: 14px; }
+  .msg { margin: 6px 0; padding: 8px 12px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; font-size: 15px; }
+  .msg.user { background: #e8f0fe; margin-left: auto; }
+  .msg.wink { background: #f1f3f4; }
+  .msg .t { display: block; font-size: 11px; color: #888; margin-top: 2px; }
+  form { display: flex; gap: 8px; margin-top: 8px; }
+  input[type=text] { flex: 1; font-size: 16px; padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
+</style>
+</head>
+<body>
+  <h1>WINK</h1>
+  <div class="sub"><b>윙크를 불러보세요</b> <span id="how"></span></div>
+
+  <div id="status" class="idle"><div class="dot"></div><div class="label" id="label">연결 중...</div></div>
+  <div id="lamp"><div class="dot"></div><div class="text" id="lamp-text">호출어 감지기 준비 중...</div></div>
+  <div class="small" id="info">서버에 연결하는 중...</div>
+
+  <div class="box"><h2>내가 한 말</h2><span id="heard"></span></div>
+  <div class="box"><h2>WINK의 답</h2><span id="answer"></span></div>
+
+  <div class="row">
+    <img id="cam" alt="안경 카메라 (아직 사진 없음)">
+    <button id="sound">🔇 소리 켜기</button>
+  </div>
+
+  <div class="hist-head">
+    <h2>대화 기록 <span class="small" id="hist-count"></span></h2>
+    <button id="hist-clear" type="button">대화 기록 지우기</button>
+  </div>
+  <div id="history"><div class="empty">아직 대화가 없어요. WINK는 여기 쌓인 대화를 기억하고 이어서 이야기해요.</div></div>
+
+  <details id="collect-box">
+    <summary>호출어 보정 데이터 모으기</summary>
+    <div class="small" style="line-height:1.6">
+      녹음하는 동안에는 호출어 감지와 대화가 멈춰요. 파일은 이 노트북의 server/wake_data 폴더에만 저장돼요.<br>
+      ① <b>"윙크야" 녹음</b>: 안경을 쓰고 "윙크야"만 2~3초 간격으로 20번쯤 말하세요. 다른 말은 하지 마세요.<br>
+      ② <b>소음·평범한 말 녹음</b>: "윙크야"를 빼고 평소 말, 카페 소음, 음악을 1~2분 이상 들려주세요. (오감지가 났던 환경이 좋아요)
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="rec-pos" type="button">🎙 "윙크야" 녹음 시작</button>
+      <button id="rec-neg" type="button">🎙 소음·평범한 말 녹음 시작</button>
+    </div>
+    <div class="small" id="rec-info">저장된 파일: 윙크야 0개 · 소음 0개</div>
+  </details>
+
+  <details>
+    <summary>글로 물어보기 (시험용)</summary>
+    <form id="form">
+      <input id="q" type="text" placeholder="Gemini에게 할 말을 입력하세요">
+      <button type="submit" id="ask">보내기</button>
+    </form>
+    <div class="box" id="out">응답이 여기에 나옵니다.</div>
+  </details>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LABELS = { idle: '대기 중', listening: '듣는 중', thinking: '생각 중', answering: '답하는 중' };
+const bridge = { serial: false, port: null };
+let wakeEnabled = false;  // 호출어 감지 사용 여부
+let wakeReady = false;
+let wakeWord = '';        // 호출어 이름 (감지를 켰을 때 서버가 알려줌)
+
+// ---- 상태 표시 ----
+function setState(s) {
+  $('status').className = s;
+  $('label').textContent = LABELS[s] || s;
+  if (s === 'listening') { $('heard').textContent = ''; $('answer').textContent = ''; $('answer').className = ''; }
+}
+function setInfo() {
+  const parts = [];
+  parts.push(bridge.serial ? `브릿지 보드 연결됨 (${bridge.port})` : '브릿지 보드 연결 안 됨 (USB를 확인하세요)');
+  if (wakeEnabled) parts.push(wakeReady ? '호출어 감지기 준비됨' : '호출어 감지기 준비 중');
+  $('info').textContent = parts.join(' · ');
+  $('how').textContent = wakeEnabled && wakeWord ? `("${wakeWord}"라고 불러도 됩니다)` : '';
+  if (!lampTimer) lampIdle();
+}
+
+// ---- 소리 재생 (Gemini 답, 24kHz 16비트 모노) ----
+let actx = null, playAt = 0, soundOn = false;
+$('sound').onclick = () => {
+  soundOn = !soundOn;
+  if (soundOn) { actx = actx || new AudioContext({ sampleRate: 24000 }); actx.resume(); }
+  $('sound').textContent = soundOn ? '🔊 소리 끄기' : '🔇 소리 켜기';
+};
+function playPcm(b64) {
+  if (!soundOn || !actx) return;
+  const bin = atob(b64);
+  const n = bin.length >> 1;
+  const f = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+    if (v >= 32768) v -= 65536;
+    f[i] = v / 32768;
+  }
+  const buf = actx.createBuffer(1, n, 24000);
+  buf.copyToChannel(f, 0);
+  const src = actx.createBufferSource();
+  src.buffer = buf;
+  src.connect(actx.destination);
+  playAt = Math.max(playAt, actx.currentTime + 0.05);
+  src.start(playAt);
+  playAt += buf.duration;
+}
+
+// ---- 서버 사건 받기 ----
+const es = new EventSource('/events');
+es.addEventListener('state', (e) => {
+  const d = JSON.parse(e.data);
+  setState(d.state);
+  if (d.reason === 'no-speech') $('heard').textContent = '(말이 들리지 않아 취소했어요)';
+  if (d.reason === 'too-short') $('heard').textContent = '(너무 짧아서 취소했어요)';
+});
+es.addEventListener('bridge', (e) => { Object.assign(bridge, JSON.parse(e.data)); setInfo(); });
+es.addEventListener('wake-mode', (e) => { wakeEnabled = JSON.parse(e.data).enabled; setInfo(); });
+es.addEventListener('wake-ready', (e) => {
+  wakeReady = true;
+  wakeWord = JSON.parse(e.data).word || '';  // 서버가 wakeword.py 가 알려준 호출어 이름 를 알려준다
+  setInfo();
+});
+es.addEventListener('input', (e) => { $('heard').textContent += JSON.parse(e.data).text; });
+es.addEventListener('output', (e) => { $('answer').textContent += JSON.parse(e.data).text; });
+es.addEventListener('audio', (e) => playPcm(JSON.parse(e.data).pcm));
+es.addEventListener('problem', (e) => {
+  $('answer').className = 'err';
+  $('answer').textContent = '오류: ' + JSON.parse(e.data).message;
+});
+// ---- 호출어 불빛: 대기 중(노랑, 깜빡임) -> "윙크야" 들림(초록) / 버튼으로 시작(파랑) -> 2.5초 뒤 다시 대기 ----
+let lampTimer = null;
+function setLamp(kind, text) {
+  $('lamp').className = kind;
+  $('lamp-text').textContent = text;
+}
+function lampIdle() {
+  lampTimer = null;
+  if (!wakeEnabled) return setLamp('', '호출어 감지 꺼짐 (컨트롤러 버튼으로 호출하세요)');
+  setLamp('waiting', wakeReady ? `"${wakeWord || '윙크야'}"를 기다리는 중` : '호출어 감지기 준비 중...');
+}
+es.addEventListener('wake', (e) => {
+  const d = JSON.parse(e.data);
+  clearTimeout(lampTimer);
+  if (d.via === 'button') setLamp('heard', '버튼으로 호출했어요');  // 지금은 초록색으로 같이 표시. 구분하려면 'heard'를 'button'(파랑)으로
+  else setLamp('heard', `"${wakeWord || '윙크야'}" 들렸어요!` + (d.score ? ` (점수 ${d.score})` : ''));
+  lampTimer = setTimeout(lampIdle, 2500);
+});
+// ---- 호출어 보정 녹음 ----
+const REC_NAMES = { pos: '"윙크야"', neg: '소음·평범한 말' };
+es.addEventListener('collect', (e) => {
+  const s = JSON.parse(e.data);
+  const recording = s.active;
+  $('rec-pos').textContent = recording && s.label === 'pos' ? '⏹ 녹음 끝내고 저장' : '🎙 "윙크야" 녹음 시작';
+  $('rec-neg').textContent = recording && s.label === 'neg' ? '⏹ 녹음 끝내고 저장' : '🎙 소음·평범한 말 녹음 시작';
+  $('rec-pos').disabled = recording && s.label !== 'pos';
+  $('rec-neg').disabled = recording && s.label !== 'neg';
+  $('rec-info').textContent = (recording ? `🔴 ${REC_NAMES[s.label]} 녹음 중 ${s.seconds}초 · ` : '') +
+    `저장된 파일: 윙크야 ${s.saved.pos}개 · 소음 ${s.saved.neg}개`;
+  if (recording) setLamp('', `${REC_NAMES[s.label]} 녹음 중 (호출어 감지는 멈춤)`); else if (!lampTimer) lampIdle();
+});
+for (const label of ['pos', 'neg']) {
+  $('rec-' + label).onclick = async () => {
+    const recording = $('rec-' + label).textContent.startsWith('⏹');
+    const r = await fetch(recording ? '/collect/stop' : '/collect/start?label=' + label, { method: 'POST' });
+    if (!r.ok) alert('지금은 대화 중이라 녹음을 시작할 수 없어요. 대기 중일 때 다시 눌러 주세요.');
+  };
+}
+es.addEventListener('frame', () => { if (!$('cam').dataset.busy) { $('cam').dataset.busy = 1; $('cam').src = '/frame.jpg?' + Date.now(); } });
+$('cam').onload = $('cam').onerror = () => { delete $('cam').dataset.busy; };
+es.onopen = () => { $('label').textContent = LABELS.idle; setInfo(); };
+es.onerror = () => { $('label').textContent = '서버 연결 끊김'; $('status').className = 'idle'; };
+
+// ---- 대화 기록 (WINK가 기억하는 대화) ----
+let histCount = 0;
+function addHistory(item) {
+  const box = $('history');
+  if (!histCount) box.innerHTML = '';
+  const time = item.at ? new Date(item.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
+  for (const [who, text] of [['user', item.user], ['wink', item.wink]]) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + who;
+    div.textContent = text;
+    const t = document.createElement('span');
+    t.className = 't';
+    t.textContent = (who === 'user' ? '나' : 'WINK') + (time ? ' · ' + time : '');
+    div.appendChild(t);
+    box.appendChild(div);
+  }
+  histCount++;
+  $('hist-count').textContent = `(${histCount})`;
+  box.scrollTop = box.scrollHeight;
+}
+function renderHistory(list) {
+  histCount = 0;
+  $('history').innerHTML = '<div class="empty">아직 대화가 없어요. WINK는 여기 쌓인 대화를 기억하고 이어서 이야기해요.</div>';
+  $('hist-count').textContent = '';
+  for (const item of list) addHistory(item);
+}
+es.addEventListener('history-all', (e) => renderHistory(JSON.parse(e.data)));
+es.addEventListener('history', (e) => addHistory(JSON.parse(e.data)));
+$('hist-clear').onclick = async () => {
+  if (!confirm('대화 기록을 모두 지울까요? WINK가 이전 대화를 잊어요.')) return;
+  await fetch('/history/clear', { method: 'POST' });
+};
+
+// ---- 글로 물어보기 (시험용) ----
+$('form').onsubmit = async (ev) => {
+  ev.preventDefault();
+  const text = $('q').value.trim();
+  if (!text) return;
+  $('ask').disabled = true;
+  $('out').className = 'box';
+  $('out').textContent = '묻는 중...';
+  try {
+    const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    $('out').textContent = data.text;
+  } catch (e) {
+    $('out').className = 'box err';
+    $('out').textContent = '오류: ' + e.message;
+  } finally {
+    $('ask').disabled = false;
+  }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,144 @@
+# WINK SPEC
+
+팀 3명이 ESP32 보드 + 노트북 서버 + 웹 화면으로 WINK(AI 윙맨) 프로토타입을 함께 만든다.
+서비스 설명은 `CLAUDE.md`를 본다. 이 문서는 **무엇을 어떤 이름으로 만드는지**만 정한다.
+여기 적힌 이름(파일, 함수, 포트, 이벤트, 화면 id)은 그대로 쓴다. 없는 이름이 필요하면 새로 만들지 말고 제안한다.
+
+## 1. 전체 흐름
+
+```
+[컨트롤러 보드] --Wi-Fi(8081)--> [브릿지 보드] <--Wi-Fi(8080)--> [안경 보드]
+                                      |
+                                  USB 시리얼
+                                      |
+                              [노트북 서버(server)] --웹소켓--> Gemini Live API
+                                      |
+                              HTTP / SSE(/events)
+                                      |
+                              [웹 화면(server/public)]  http://localhost:3000
+```
+
+- 컨트롤러 버튼을 누르는 동안 WINK가 듣는다. (누름 `DOWN`, 뗌 `UP`)
+- 안경 보드는 카메라 사진(JPEG)과 마이크 소리를 브릿지로 보낸다.
+- 서버는 소리를 Gemini Live에 보내고, 응답을 글자와 소리로 웹 화면에 보여준다.
+- 서보 보드는 AI가 말할 때 움직인다. (노트북 USB 시리얼 명령)
+
+## 2. 영역과 담당 (파일 기준)
+
+담당자 이름은 정해지면 채운다.
+
+| 영역 | 종류 | 폴더 / 파일 | 담당 |
+|---|---|---|---|
+| 브릿지 | 보드에 올리는 코드 | `firmware/bridge/` | (미정) |
+| 안경 | 보드에 올리는 코드 | `firmware/glasses/` | (미정) |
+| 컨트롤러 | 보드에 올리는 코드 | `firmware/controller/` | (미정) |
+| 서보 | 보드에 올리는 코드 | `firmware/servo/` | (미정) |
+| 서버 | 노트북 서버 코드 | `server/*.js`, `server/*.py` | (미정) |
+| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/partner.js`, `server/coaching.js` | (미정) |
+| 웹 화면 | 웹 화면 코드 | `server/public/index.html` | (미정) |
+| 호출어·모델 | 노트북 서버 코드 | `server/wakeword.py`, `server/wakeDetector.js`, `server/train_verifier.py`, `models/` | (미정) |
+
+공용(바꾸면 양쪽이 같이 바뀌어야 하는 값)은 4장의 약속이다. 바꾸려면 먼저 팀에 알린다.
+
+## 3. 보드
+
+공통: 보드는 XIAO ESP32S3 (안경은 Sense). PlatformIO 환경 이름은 `seeed_xiao_esp32s3`. 내장 LED는 핀 21(켜짐 = LOW).
+
+| 보드 | 폴더 | 하는 일 | 핀 |
+|---|---|---|---|
+| 브릿지 | `firmware/bridge` | Soft AP(`AP_SSID`)를 열고 TCP 두 포트를 받는다. 안경이 보낸 것을 USB 시리얼로 전달하고, 노트북이 보낸 것은 안경에 전달한다. 컨트롤러가 끊기면 안경에 `OFF`를 대신 보낸다. | - |
+| 안경 | `firmware/glasses` | 카메라 JPEG와 마이크 소리를 프레임으로 만들어 브릿지 데이터 포트로 보낸다. `ON`/`OFF`를 받으면 보내기를 켜고 끈다. | 카메라 핀은 Sense 보드 기본값(`CAM_PIN_*`) |
+| 컨트롤러 | `firmware/controller` | 버튼을 누르면 `DOWN\n`, 떼면 `UP\n`을 브릿지 제어 포트로 보낸다. | 버튼 `D4` (누르면 LOW, 내부 풀업) |
+| 서보 | `firmware/servo` | USB 시리얼(115200) 명령으로 움직인다. | 신호선 `D0` |
+
+보드가 쓰는 Wi-Fi 이름과 비밀번호는 각 `main.cpp`의 `AP_SSID`, `AP_PASSWORD` 상수에 있다. (SPEC에는 적지 않는다)
+
+## 4. 약속 (바꾸면 여러 영역이 같이 바뀐다)
+
+### 4.1 네트워크 포트
+
+| 이름 | 값 | 누가 | 용도 |
+|---|---|---|---|
+| `DATA_PORT` | 8080 | 브릿지가 열고 안경이 접속 | 안경 -> 브릿지 데이터, 노트북 -> 안경 제어 |
+| `CONTROL_PORT` | 8081 | 브릿지가 열고 컨트롤러가 접속 | 컨트롤러 버튼 신호 |
+| 서버 `PORT` | 3000 | 노트북 서버 | 웹 화면과 API |
+
+### 4.2 안경 -> 노트북 프레임 (시리얼)
+
+`[AA 55 A5 5A] [종류 1바이트] [길이 4바이트, little-endian] [데이터]`
+
+| 종류 | 의미 | 데이터 |
+|---|---|---|
+| 1 | 카메라 사진 | JPEG 한 장 |
+| 2 | 마이크 소리 | PCM 조각 (16kHz, 16비트, 모노) |
+| 3 | 컨트롤러 버튼 | 1바이트 (1 = 누름, 0 = 뗌) |
+
+만든 쪽: `firmware/glasses`의 `writeHeader`. 읽는 쪽: `server/bridgeSerial.js`의 `startBridgeSerial`.
+
+### 4.3 한 줄 명령
+
+| 방향 | 명령 | 뜻 |
+|---|---|---|
+| 컨트롤러 -> 브릿지 | `DOWN`, `UP` | 버튼 누름, 뗌 |
+| 브릿지 -> 안경 | `ON`, `OFF` | 보내기 시작, 멈춤 |
+| 노트북 -> 서보 | `TALK`, `STOP`, `TEST`, `ANGLE n` | 말하는 동안 움직임, 멈춤, 왕복 시험, 각도 지정(0~180) |
+
+### 4.4 서버 -> 웹 화면 (`GET /events`, SSE)
+
+`emit(type, data)`로 보낸다. 종류: `state`, `wake`, `wake-ready`, `input`, `output`, `audio`, `frame`, `problem`, `bridge`, `collect`, `history`, `history-all`.
+
+### 4.5 서버 HTTP 경로
+
+| 경로 | 방식 | 용도 |
+|---|---|---|
+| `/`, `/index.html` | GET | 웹 화면 |
+| `/events` | GET | 실시간 이벤트(SSE) |
+| `/frame.jpg` | GET | 가장 최근 카메라 사진 |
+| `/ask` | POST | 글자로 질문(시험용) |
+| `/history/clear` | POST | 대화 기록 지우기 |
+| `/collect/start?label=pos\|neg`, `/collect/stop` | POST | 호출어 녹음 모으기 |
+
+### 4.6 서버 주요 이름
+
+| 파일 | 이름 | 하는 일 |
+|---|---|---|
+| `server/server.js` | `emit` | 웹 화면으로 이벤트 보내기 |
+| `server/bridgeSerial.js` | `startBridgeSerial` | 브릿지 시리얼에서 프레임 읽기 (`serialReader.py` 사용) |
+| `server/voiceSession.js` | `createVoiceSession` | 듣기(idle -> listening -> thinking) 상태 관리 |
+| `server/geminiLive.js` | `askGemini`, `startLiveTurn`, `buildSystemText`, `SYSTEM_INSTRUCTION` | Gemini Live 호출과 말투 지침 |
+| `server/coaching.js` | `onAudio`, `buildCoachingText` | 말소리/침묵 측정과 코칭 규칙 |
+| `server/personas.js` | `buildPersonaText` | 두 사람 페르소나를 지침에 붙이기 |
+| `server/conversationHistory.js` | `load`, `save` | 대화 기록 저장 (`history.json`) |
+| `server/wakeDetector.js` | `createWakeDetector` | 호출어("윙크야") 감지 |
+| `server/collector.js` | `createCollector` | 호출어 녹음 모으기 |
+
+### 4.7 웹 화면 id (`server/public/index.html`)
+
+`how`, `status`, `label`, `lamp`, `lamp-text`, `info`, `heard`, `answer`, `cam`, `sound`, `hist-count`, `hist-clear`, `history`, `collect-box`, `rec-pos`, `rec-neg`, `rec-info`, `form`, `q`, `ask`, `out`
+
+### 4.8 환경 변수 (`server/.env`)
+
+`GEMINI_API_KEY`, `SERIAL_PORT`, `WAKE_THRESHOLD`. 값은 `.env`에만 두고 git에 올리지 않는다.
+
+## 5. AI 동작 규칙
+
+- 모델: `models/gemini-2.5-flash-native-audio-preview-12-2025`. 응답은 소리와 글자로 함께 보여준다.
+- 말투와 성격은 `SYSTEM_INSTRUCTION`에서 정한다. (WINK 기획서의 3장은 Gemini에게 직접 전달되지 않는다)
+- 카메라는 항상 분석하지 않는다. 사물이나 장면을 봐야 답할 수 있을 때만 사진을 쓴다.
+- 마이크로는 소리 크기만 측정하고 말 내용은 저장하지 않는다. 측정하지 못한 것은 "없음"이라고 알려 지어내지 못하게 한다.
+- 페르소나는 가상 인물만 쓴다. 실제 사람의 이름이나 연락처는 넣지 않는다.
+
+## 6. 작업 규칙
+
+- `main`에는 직접 올리지 않는다. 이슈마다 브랜치를 만들고 PR로 합친다. 시작 전에 `main`을 최신으로 받는다.
+- 내 영역(2장) 파일만 고친다. 다른 영역을 고쳐야 하면 멈추고 먼저 이야기한다.
+- 4장의 약속을 바꿀 때는 이 문서를 같이 고치는 PR로 올린다.
+- 커밋 메시지와 PR 설명은 한국어로 쓰고 이슈 번호를 붙인다. (예: `서보 말하는 동작 추가 (#3)`)
+- 보드에 올릴 때는 보드를 한 번에 하나만 USB에 연결한다.
+- 비밀번호와 API 키는 코드나 문서에 쓰지 않는다. (`server/.env`만 사용)
+
+## 7. 아직 정할 것
+
+- 팀원별 담당 영역(2장)
+- 새 GitHub 저장소 이름과 올릴 범위(폴더 이름을 `WINK`로 바꾼 뒤 결정)
+- 이슈 목록과 브랜치 이름 규칙

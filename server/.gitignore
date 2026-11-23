@@ -1,0 +1,7 @@
+node_modules/
+.env
+.venv/
+*.log
+*.pcm
+history.json
+wake_data/

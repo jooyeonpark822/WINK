@@ -1,0 +1,10 @@
+{
+  "name": "workshop-06-server",
+  "version": "1.0.0",
+  "description": "Gemini Live와 소통하는 서버 코드와 호출어(윙크야) 감지기, 브릿지 보드 시리얼 수신",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "ISC"
+}
