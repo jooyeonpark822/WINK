@@ -34,7 +34,7 @@
 | 컨트롤러 | 보드에 올리는 코드 | `firmware/controller/` | (미정) |
 | 서보 | 보드에 올리는 코드 | `firmware/servo/` | `jooyeonpark822` (lane-B) |
 | 서버 | 노트북 서버 코드 | `server/*.js`, `server/*.py` | (미정). 단 lane 작업에 쓰는 파일은 아래 표를 따른다 |
-| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/partner.js`, `server/coaching.js` | `sangheon03` (lane-A) |
+| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/partner.js`, `server/coaching.js` | `jooyeonpark822` (lane-A) |
 | 웹 화면 | 웹 화면 코드 | `server/public/index.html` | (미정). 서보 시험 버튼(#9)만 `jooyeonpark822` |
 | 호출어·모델 | 노트북 서버 코드 | `server/wakeword.py`, `server/wakeDetector.js`, `server/train_verifier.py`, `models/` | (미정) |
 
@@ -153,7 +153,7 @@ GitHub 이슈: https://github.com/jooyeonpark822/WINK/issues
 
 | 레인 | 목표 | 담당 | 이슈 |
 |---|---|---|---|
-| lane-A | AI 말투·대답 | `sangheon03` | #1~#5 |
+| lane-A | AI 말투·대답 | `jooyeonpark822` | #1~#5 |
 | lane-B | 모터 (웹 버튼 시험) | `jooyeonpark822` | #6~#10 |
 | lane-C | 제품에서 Gemini 소리 | `fernwehs` | #11~#16 |
 
