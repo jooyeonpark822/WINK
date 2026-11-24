@@ -2,6 +2,7 @@
 #include <ESP_I2S.h>
 #include <WiFi.h>
 #include "esp_camera.h"
+#include "driver/ledc.h"
 
 // 브릿지 보드의 Soft AP에 접속하고, 카메라 이미지(초당 1장)와 마이크 소리를 계속 브릿지로 보낸다.
 // 컨트롤러 버튼이 눌리면(HELP 신호) 노트북 서버에 버튼 눌림 프레임을 보낸다. (스트리밍은 멈추지 않는다)
@@ -35,6 +36,22 @@ constexpr size_t AUDIO_BUFFER_BYTES = 49152; // 사진을 보내는 동안 소�
 // 내장 LED (GPIO21, 반전 로직: LOW = 켜짐)
 constexpr uint8_t LED_PIN = 21;
 constexpr uint32_t BLINK_HALF_PERIOD_MS = 250;
+
+// 서보모터 2개 (신호선만 보드에 연결. 전원은 5V 핀, GND는 공통)
+// 카메라가 PWM 타이머 0 / 채널 0을 쓰므로, 서보는 타이머 2 / 채널 2, 3을 직접 지정해서 서로 부딪히지 않게 한다.
+// 명령(한 줄, 줄 끝 \n)은 USB 시리얼이나 브릿지로 받는다: TALK, STOP, TEST, ANGLE n, ANGLE1 n, ANGLE2 n
+constexpr int SERVO1_PIN = D0;
+constexpr int SERVO2_PIN = D1;
+constexpr ledc_timer_t SERVO_TIMER = LEDC_TIMER_2;
+constexpr ledc_channel_t SERVO1_CHANNEL = LEDC_CHANNEL_2;
+constexpr ledc_channel_t SERVO2_CHANNEL = LEDC_CHANNEL_3;
+constexpr int SERVO_MIN_US = 500;
+constexpr int SERVO_MAX_US = 2400;
+constexpr int SERVO_CENTER = 90;
+constexpr int SERVO_SWING = 25;                  // 말할 때 가운데에서 좌우로 흔들리는 폭
+constexpr uint32_t SERVO_SWING_PERIOD_MS = 600;  // 한 번 왕복하는 시간
+constexpr uint32_t SERVO_UPDATE_MS = 15;
+constexpr uint32_t SERVO_TEST_STEP_MS = 700;
 
 // XIAO ESP32S3 Sense 카메라 핀
 constexpr int CAM_PIN_PWDN = -1;
@@ -91,6 +108,129 @@ void writeHeader(uint8_t* out, uint8_t type, uint32_t len) {
   out[6] = (len >> 8) & 0xFF;
   out[7] = (len >> 16) & 0xFF;
   out[8] = (len >> 24) & 0xFF;
+}
+
+// ---- 서보 ----
+bool servoTalking = false;
+int servoTestStep = -1;  // -1이면 TEST 중이 아님
+uint32_t servoTestStepMs = 0;
+
+void servoWrite(ledc_channel_t channel, int angle) {
+  angle = constrain(angle, 0, 180);
+  uint32_t pulseUs = SERVO_MIN_US + (uint32_t)angle * (SERVO_MAX_US - SERVO_MIN_US) / 180;
+  uint32_t duty = pulseUs * 16384UL / 20000UL;  // 14비트, 50Hz(20ms)
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, duty);
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, channel);
+}
+
+void servoMoveBoth(int angle) {
+  servoWrite(SERVO1_CHANNEL, angle);
+  servoWrite(SERVO2_CHANNEL, angle);
+}
+
+void initServos() {
+  ledc_timer_config_t timer = {};
+  timer.speed_mode = LEDC_LOW_SPEED_MODE;
+  timer.duty_resolution = LEDC_TIMER_14_BIT;
+  timer.timer_num = SERVO_TIMER;
+  timer.freq_hz = 50;
+  timer.clk_cfg = LEDC_AUTO_CLK;
+  ledc_timer_config(&timer);
+
+  const int pins[2] = {SERVO1_PIN, SERVO2_PIN};
+  const ledc_channel_t channels[2] = {SERVO1_CHANNEL, SERVO2_CHANNEL};
+  for (int i = 0; i < 2; i++) {
+    ledc_channel_config_t ch = {};
+    ch.gpio_num = pins[i];
+    ch.speed_mode = LEDC_LOW_SPEED_MODE;
+    ch.channel = channels[i];
+    ch.timer_sel = SERVO_TIMER;
+    ch.duty = 0;
+    ch.hpoint = 0;
+    ledc_channel_config(&ch);
+  }
+  servoMoveBoth(SERVO_CENTER);
+  Serial.println("Servo OK (D0, D1)");
+}
+
+// 명령 한 줄을 처리한다. 서보 명령이면 true.
+bool handleServoCommand(const char* line) {
+  char cmd[24];
+  size_t n = 0;
+  for (; line[n] && n < sizeof(cmd) - 1; n++) cmd[n] = toupper((unsigned char)line[n]);
+  cmd[n] = '\0';
+
+  if (strcmp(cmd, "TALK") == 0) {
+    servoTalking = true;
+    servoTestStep = -1;
+    Serial.println("OK TALK");
+  } else if (strcmp(cmd, "STOP") == 0) {
+    servoTalking = false;
+    servoTestStep = -1;
+    servoMoveBoth(SERVO_CENTER);
+    Serial.println("OK STOP");
+  } else if (strcmp(cmd, "TEST") == 0) {
+    servoTalking = false;
+    servoTestStep = 0;
+    servoTestStepMs = 0;  // 다음 loop에서 바로 시작
+    Serial.println("OK TEST");
+  } else if (strncmp(cmd, "ANGLE1 ", 7) == 0 || strncmp(cmd, "ANGLE2 ", 7) == 0) {
+    servoTalking = false;
+    servoTestStep = -1;
+    int angle = constrain(atoi(cmd + 7), 0, 180);
+    servoWrite(cmd[5] == '1' ? SERVO1_CHANNEL : SERVO2_CHANNEL, angle);
+    Serial.printf("OK ANGLE%c %d\n", cmd[5], angle);
+  } else if (strncmp(cmd, "ANGLE ", 6) == 0) {
+    servoTalking = false;
+    servoTestStep = -1;
+    int angle = constrain(atoi(cmd + 6), 0, 180);
+    servoMoveBoth(angle);
+    Serial.printf("OK ANGLE %d\n", angle);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+// USB 시리얼로 들어온 명령을 읽는다. (시험용)
+void readServoSerial() {
+  static char line[24];
+  static size_t len = 0;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') {
+      line[len] = '\0';
+      if (len > 0 && !handleServoCommand(line)) Serial.println("ERR UNKNOWN");
+      len = 0;
+    } else if (c != '\r' && len < sizeof(line) - 1) {
+      line[len++] = c;
+    }
+  }
+}
+
+// 멈추지 않고(delay 없이) 서보를 움직인다. 소리와 사진 전송이 끊기지 않게 loop마다 조금씩만 처리한다.
+void updateServos() {
+  uint32_t now = millis();
+
+  if (servoTestStep >= 0) {  // TEST: 0 -> 90 -> 180 -> 90도
+    const int steps[] = {0, 90, 180, 90};
+    if (servoTestStepMs == 0 || now - servoTestStepMs >= SERVO_TEST_STEP_MS) {
+      if (servoTestStep >= 4) {
+        servoTestStep = -1;
+      } else {
+        servoMoveBoth(steps[servoTestStep++]);
+        servoTestStepMs = now ? now : 1;
+      }
+    }
+    return;
+  }
+
+  static uint32_t lastUpdate = 0;
+  if (now - lastUpdate < SERVO_UPDATE_MS) return;
+  lastUpdate = now;
+  if (!servoTalking) return;
+  float phase = (now % SERVO_SWING_PERIOD_MS) / (float)SERVO_SWING_PERIOD_MS;
+  servoMoveBoth(SERVO_CENTER + (int)(SERVO_SWING * sinf(phase * TWO_PI)));
 }
 
 bool initCamera() {
@@ -266,6 +406,7 @@ void readControl() {
       controlLine[controlLen] = '\0';
       if (strcmp(controlLine, "DOWN") == 0) sendButton(1);
       else if (strcmp(controlLine, "UP") == 0 || strcmp(controlLine, "OFF") == 0) sendButton(0);
+      else handleServoCommand(controlLine);  // 서보 명령(TALK 등)도 브릿지로 받을 수 있다
       controlLen = 0;
     } else if (c != '\r' && controlLen < sizeof(controlLine) - 1) {
       controlLine[controlLen++] = c;
@@ -279,6 +420,7 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   setLed(false);
 
+  initServos();
   cameraReady = initCamera();
   lastCameraTryMs = millis();
   micReady = initMic();
@@ -315,6 +457,9 @@ void printStats() {
 }
 
 void loop() {
+  readServoSerial();
+  updateServos();
+
   static bool wasConnected = false;
   bool connected = WiFi.status() == WL_CONNECTED;
 
