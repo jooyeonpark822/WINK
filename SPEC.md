@@ -91,12 +91,14 @@
 | 컨트롤러 -> 브릿지 | `DOWN`, `UP` | 버튼 누름, 뗌 |
 | 브릿지 -> 안경 | `ON`, `OFF` | 보내기 시작, 멈춤 |
 | 노트북 -> 서보 | `TALK`, `STOP`, `TEST`, `ANGLE n` | 말하는 동안 움직임, 멈춤, 왕복 시험, 각도 지정(0~180) |
-| 노트북 -> 안경 (서보) | `ANGLE1 n`, `ANGLE2 n` | 틸트(D0) 또는 팬(D1)만 n도(0~180)로. `STOP`, 부팅, `TEST` 끝의 영점은 틸트 0도, 팬 90도 |
+| 노트북 -> 안경 (서보) | `ANGLE1 n`, `ANGLE2 n` | 틸트(D0) 또는 팬(D1)만 n도(0~180)로. 틸트는 각도가 커질수록 **아래**로 내려가고 0도가 위쪽 끝이다. `STOP`, 부팅, `TEST` 끝의 영점은 틸트 **20도**(올려다보기가 끝까지 갈 수 있는 가장 작은 값), 팬 90도. 영점은 `firmware/glasses`의 `SERVO1_HOME`과 `server/server.js`의 `TILT_HOME`이 같아야 한다 |
 | 노트북 -> 안경 (스피커) | `BEEP` | 시험음 (880Hz, 0.4초) |
 | 노트북 -> 안경 (날개 톱니, 360도 연속 회전형 서보) | `WING n` (-100~100), `WING STOP`, `WING TRIM n` | 속도로 회전(0 = 정지), 정지, 정지 위치 보정(-200~200us) |
-| | `WING SWING`, `WING TURN n`, `WING SPEED n`, `WING CAL ms`, `WING ZERO`, `WING POS` | 각도로 움직이기. 이 모터는 각도 센서가 없어서 돌린 시간으로 추정한다. 영점에서 -90 <-> +90도 오가기, n도 돌기, 속도(10~100), 90도 도는 시간 보정, 지금 위치를 0도로, 추정 각도 |
+| | `WING SWING`, `WING TURN n`, `WING SPEED n`, `WING CAL ms`, `WING ZERO`, `WING HOME`, `WING POS` | 각도로 움직이기. 이 모터는 각도 센서가 없어서 돌린 시간으로 추정한다. 영점에서 -5 <-> +5도(`WING_SWING_RANGE`) 오가기, n도 돌기, 속도(10~100), 90도 도는 시간 보정, 지금 위치를 0도로, 추정 각도가 0이 되도록 돌아가기, 추정 각도 |
 
-안경은 위 서보 명령(`TALK`, `STOP`, `TEST`, `ANGLE n` 포함)과 `BEEP`을 USB 시리얼과 브릿지(데이터 포트) 양쪽으로 받는다. `ANGLE1`/`ANGLE2`는 서보 보드(`firmware/servo`)에도 있다.
+안경은 위 서보 명령(`TALK`, `STOP`, `TEST`, `ANGLE n` 포함)과 `BEEP`을 USB 시리얼과 브릿지(데이터 포트) 양쪽으로 받는다. `ANGLE1`/`ANGLE2`는 서보 보드(`firmware/servo`)에도 있다. 안경에서 `TALK`은 팬은 `cos`, 틸트는 `sin`으로 영점 기준 **동그라미**를 그린다(한 바퀴 3.5초, 팬 ±10도, 틸트 영점에서 아래로 0~12도, 작게 살랑살랑, 시작 0.6초는 서서히). 날개 모터는 정지(`WING STOP`, `WING 0`, 영점 복귀 끝, 부팅)일 때 **PWM 신호를 끊는다**(연속 회전형 서보가 서서히 도는 것과 전원 잡음을 막으려고).
+
+**대답할 때 모터 움직이기:** 서버는 Gemini 대답 소리가 안경 스피커로 나가기 시작하면 안경에 `TALK`과 `WING SWING`을 보내고, 마지막 소리까지 재생이 끝나면(+0.3초) `STOP`과 `WING HOME`을 보낸다. 음성 대화와 글자 질문(`/ask`) 모두 같다. 명령은 `server/bridgeSerial.js`의 `sendCommand`로 보낸다. (줄 명령은 15글자 이하)
 
 ### 4.4 서버 -> 웹 화면 (`GET /events`, SSE)
 
@@ -110,6 +112,8 @@
 | `/events` | GET | 실시간 이벤트(SSE) |
 | `/frame.jpg` | GET | 가장 최근 카메라 사진 |
 | `/ask` | POST | 글자로 질문(시험용) |
+| `/servo/test?action=nod\|shake\|lookup\|home\|wing-slow\|wing-fast\|wing-stop` | POST | 안경 모터 시험 버튼. 서버가 브릿지를 거쳐 안경에 `ANGLE1`/`ANGLE2`/`WING *` 명령을 보낸다. 답하는 중에도 누르면 움직인다(답하며 움직이던 동작은 멈춘다). 브릿지가 없으면 409, 알 수 없는 동작이면 400 |
+| `/scenario?id=playlist\|charm\|pairing\|topics\|wink\|hearts\|ments\|flutter\|shy\|mission\|megi\|megi_yes\|megi_no\|more` | POST | 웹 화면 "시나리오별 버튼". 말하는 버튼은 정해 둔 문장(`SCENARIOS`의 prompt)을 Gemini에게 보내 짧게 귓속말로 대답하게 하고(조용하고 차분한 말투(지침 `WHISPER_TONE`을 `hint`로 전달)로 하고 소리는 `WHISPER_GAIN`배로 줄여 소리는 안경 스피커, 글자는 응답 `text`와 대화 기록), 모터 버튼(페어링·윙크·하트·설렐 때·부끄러울 때)은 눈 화면이 아직 없어 모터/삑 소리로 대신한다. 말하는 버튼은 WINK가 `idle`이 아니면 409, 모터 버튼은 브릿지가 없으면 409, 알 수 없는 id면 400 |
 | `/history/clear` | POST | 대화 기록 지우기 |
 | `/collect/start?label=pos\|neg`, `/collect/stop` | POST | 호출어 녹음 모으기 |
 
@@ -118,7 +122,7 @@
 | 파일 | 이름 | 하는 일 |
 |---|---|---|
 | `server/server.js` | `emit` | 웹 화면으로 이벤트 보내기 |
-| `server/bridgeSerial.js` | `startBridgeSerial`, `sendAudio` | 브릿지 시리얼에서 프레임 읽기 (`serialReader.py` 사용). `sendAudio`는 Gemini 대답 소리를 안경 스피커로 보내기 |
+| `server/bridgeSerial.js` | `startBridgeSerial`, `sendAudio`, `sendCommand`, `onSpeaking` | 브릿지 시리얼에서 프레임 읽기 (`serialReader.py` 사용). `sendAudio`는 Gemini 대답 소리를 안경 스피커로 보내기. `sendCommand`는 안경에 한 줄 명령 보내기. `onSpeaking(on)`은 안경 스피커에서 대답이 나오기 시작/끝날 때 불리는 핸들러 |
 | `server/voiceSession.js` | `createVoiceSession` | 듣기(idle -> listening -> thinking) 상태 관리 |
 | `server/geminiLive.js` | `askGemini`, `startLiveTurn`, `buildSystemText`, `SYSTEM_INSTRUCTION` | Gemini Live 호출과 말투 지침 |
 | `server/coaching.js` | `onAudio`, `buildCoachingText` | 말소리/침묵 측정과 코칭 규칙 |
@@ -129,7 +133,7 @@
 
 ### 4.7 웹 화면 id (`server/public/index.html`)
 
-`how`, `status`, `label`, `lamp`, `lamp-text`, `info`, `heard`, `answer`, `cam`, `sound`, `hist-count`, `hist-clear`, `history`, `collect-box`, `rec-pos`, `rec-neg`, `rec-info`, `form`, `q`, `ask`, `out`
+`how`, `status`, `label`, `lamp`, `lamp-text`, `info`, `heard`, `answer`, `cam`, `sound`, `hist-count`, `hist-clear`, `history`, `collect-box`, `rec-pos`, `rec-neg`, `rec-info`, `form`, `q`, `ask`, `out`, `servo-test`
 
 ### 4.8 환경 변수 (`server/.env`)
 
@@ -175,6 +179,4 @@ GitHub 이슈: https://github.com/jooyeonpark822/WINK/issues
 |---|---|---|
 | 새 파일 | `server/servoSerial.js` | #7 |
 | 환경 변수 | `SERVO_PORT` | #7 |
-| HTTP 경로 | `POST /servo/test` | #8 |
-| 웹 화면 id | `servo-test` | #9 |
 

@@ -49,6 +49,17 @@
   .msg .t { display: block; font-size: 11px; color: #888; margin-top: 2px; }
   form { display: flex; gap: 8px; margin-top: 8px; }
   input[type=text] { flex: 1; font-size: 16px; padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
+  #scenes { margin-top: 20px; padding: 14px; border: 1px solid #ccc; border-radius: 8px; }
+  #scenes h2 { margin: 0 0 4px; font-size: 16px; }
+  #scenes h3 { margin: 14px 0 6px; font-size: 14px; color: #555; }
+  #scenes .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  #scenes .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  #scenes .result { margin-top: 12px; white-space: pre-wrap; }
+  #servo-test { margin-top: 28px; padding: 14px; border: 1px solid #ccc; border-radius: 8px; }
+  #servo-test h2 { margin: 0 0 4px; font-size: 16px; }
+  #servo-test h3 { margin: 14px 0 6px; font-size: 14px; color: #555; }
+  #servo-test .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  #servo-test .hint { font-size: 12px; color: #888; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -95,6 +106,77 @@
     </form>
     <div class="box" id="out">응답이 여기에 나옵니다.</div>
   </details>
+
+  <div id="servo-test">
+    <h2>모터 움직여 보기 (시험용)</h2>
+    <div class="small">안경 보드의 모터를 버튼으로 움직여 봐요. WINK가 답하는 중에도 누르면 움직여요. (답하며 움직이던 동작은 멈추고 눌린 동작을 해요.)</div>
+
+    <h3>D0, D1 (머리)</h3>
+    <div class="btns">
+      <button type="button" data-action="nod">끄덕끄덕</button>
+      <button type="button" data-action="shake">절레절레</button>
+      <button type="button" data-action="lookup">올려다보기</button>
+      <button type="button" data-action="home">원점</button>
+    </div>
+    <div class="hint">올려다보기: 원점에서 팬 오른쪽으로 30도, 틸트 위로 20도. 원점 버튼으로 돌아와요.</div>
+
+    <h3>D2 (날개)</h3>
+    <div class="btns">
+      <button type="button" data-action="wing-slow">느리게</button>
+      <button type="button" data-action="wing-fast">빠르게</button>
+      <button type="button" data-action="wing-stop">정지</button>
+    </div>
+    <div class="hint">영점에서 -5도 ↔ +5도로 계속 오가요. 정지를 누르면 영점으로 돌아와 멈춰요.</div>
+
+    <div class="small" style="margin-top:10px">버튼을 누르면 여기에 결과가 나와요.</div>
+  </div>
+
+  <div id="scenes">
+    <h2>시나리오별 버튼 (시험용)</h2>
+    <div class="small">상황마다 WINK의 행동을 바로 실행해 봐요. 말하는 버튼은 소리는 안경 스피커로, 글자는 아래에 나와요. (WINK가 듣거나 답하는 중에는 눌러도 막혀요.)</div>
+
+    <h3>데이트 직전 상대방을 기다릴 때</h3>
+    <div class="btns">
+      <button type="button" data-scene="playlist">상대가 고른 플레이리스트</button>
+      <button type="button" data-scene="charm">상대의 매력 포인트</button>
+    </div>
+    <h3>첫 만남 페어링</h3>
+    <div class="btns">
+      <button type="button" data-scene="pairing">페어링 신호 + 사운드</button>
+    </div>
+    <div class="hint">눈 화면이 아직 없어서 삑 소리 + 끄덕임으로 대신해요.</div>
+    <h3>어색한 침묵</h3>
+    <div class="btns">
+      <button type="button" data-scene="topics">대화 주제 제안</button>
+    </div>
+    <h3>데이팅 도중 대신 플러팅 행동 해주기</h3>
+    <div class="btns">
+      <button type="button" data-scene="wink">윙크</button>
+      <button type="button" data-scene="hearts">눈에서 하트 날리기</button>
+    </div>
+    <div class="hint">눈 화면이 아직 없어서 모터로 대신해요. (윙크 = 고개 갸웃, 하트 = 날개 퍼덕)</div>
+    <h3>데이팅 도중 플러팅 멘트 귓속말</h3>
+    <div class="btns">
+      <button type="button" data-scene="ments">플러팅 멘트 제안</button>
+    </div>
+    <h3>데이트 도중 감정표현</h3>
+    <div class="btns">
+      <button type="button" data-scene="flutter">설렐 때 빠른 날갯짓</button>
+      <button type="button" data-scene="shy">부끄러울 때 눈과 절레절레</button>
+    </div>
+    <h3>오프라인 연프 미션</h3>
+    <div class="btns">
+      <button type="button" data-scene="mission">비밀 미션 귓속말</button>
+      <button type="button" data-scene="megi">메기와의 데이트 제안</button>
+      <button type="button" data-scene="more">데이트 종료 직전 추가 데이트 질문</button>
+    </div>
+    <div class="hint">메기 제안 뒤에 수락/거절 버튼이 나와요.</div>
+    <div class="btns" id="megi-answer" hidden style="margin-top:8px">
+      <button type="button" data-scene="megi_yes">수락</button>
+      <button type="button" data-scene="megi_no">거절</button>
+    </div>
+    <div class="box result" id="scene-out">버튼을 누르면 결과가 여기에 나와요.</div>
+  </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -264,6 +346,48 @@ $('form').onsubmit = async (ev) => {
     $('ask').disabled = false;
   }
 };
+
+// ---- 모터 움직여 보기 (시험용) ----
+document.querySelectorAll('#servo-test button[data-action]').forEach((b) => {
+  b.onclick = async () => {
+    const info = document.querySelector('#servo-test > .small:last-child');
+    info.className = 'small';
+    info.textContent = '보내는 중...';
+    try {
+      const r = await fetch('/servo/test?action=' + encodeURIComponent(b.dataset.action), { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      info.textContent = '보냈어요: ' + b.textContent.trim();
+    } catch (e) {
+      info.className = 'small err';
+      info.textContent = '오류: ' + e.message;
+    }
+  };
+});
+
+// ---- 시나리오별 버튼 ----
+document.querySelectorAll('#scenes button[data-scene]').forEach((b) => {
+  b.onclick = async () => {
+    const out = $('scene-out');
+    const all = document.querySelectorAll('#scenes button');
+    all.forEach((x) => { x.disabled = true; });
+    out.className = 'box result';
+    out.textContent = b.textContent.trim() + ' ... 보내는 중';
+    try {
+      const r = await fetch('/scenario?id=' + encodeURIComponent(b.dataset.scene), { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      out.textContent = data.text || '(대답이 비었어요)';
+      if (b.dataset.scene === 'megi') $('megi-answer').hidden = false;  // 제안을 들으면 수락/거절을 보여준다
+      if (b.dataset.scene.startsWith('megi_')) $('megi-answer').hidden = true;
+    } catch (e) {
+      out.className = 'box result err';
+      out.textContent = '오류: ' + e.message;
+    } finally {
+      all.forEach((x) => { x.disabled = false; });
+    }
+  };
+});
 </script>
 </body>
 </html>

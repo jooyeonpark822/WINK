@@ -19,15 +19,17 @@ const TYPE_BUTTON = 3;
 const TYPE_SPEAKER = 4;               // 노트북 -> 안경 스피커 소리
 const SPEAKER_CHUNK_BYTES = 960;      // 20ms 분량 (24000Hz x 2바이트 x 0.02초)
 const SPEAKER_CHUNK_MS = 20;
+const SPEAKER_TAIL_MS = 300;          // 마지막 소리를 보낸 뒤 안경에서 다 재생될 때까지 더 기다리는 여유
 const SPEAKER_LEAD_MS = 200;          // 재생 속도보다 이만큼만 앞서서 보낸다 (안경 보드의 버퍼가 넘치지 않게)
 const STATS_MS = 10000;               // 이 간격으로 받은 양을 점검한다
 const AUDIO_BYTES_PER_SEC = 32000;    // 16kHz x 16비트 모노
 const AUDIO_WARN_RATIO = 0.8;         // 소리가 기대치의 80% 아래면 경고
 
-// handlers: { onAudio(Buffer), onVideo(Buffer), onButton(pressed: boolean), onStatus(connected, portPath) }
+// handlers: { onAudio(Buffer), onVideo(Buffer), onButton(pressed: boolean), onStatus(connected, portPath), onSpeaking(on: boolean) }
+//   onSpeaking: 안경 스피커로 대답 소리가 나가기 시작하면 true, 마지막 소리까지 재생이 끝나면 false
 // debug: true면 10초마다 받은 양을 항상 보여준다 (아니면 문제가 있을 때만)
 function startBridgeSerial({ portPath, log = console.log, debug = false, ...handlers }) {
-  const { onAudio = () => {}, onVideo = () => {}, onButton = () => {}, onStatus = () => {} } = handlers;
+  const { onAudio = () => {}, onVideo = () => {}, onButton = () => {}, onStatus = () => {}, onSpeaking = () => {} } = handlers;
   const python = process.platform === 'win32'
     ? path.join(__dirname, '.venv', 'Scripts', 'python.exe')
     : path.join(__dirname, '.venv', 'bin', 'python');
@@ -118,6 +120,14 @@ function startBridgeSerial({ portPath, log = console.log, debug = false, ...hand
   let speakerNextAt = 0;
   let speakerTimer = null;
   let speakerBytesSent = 0;
+  let speaking = false;          // 안경 스피커에서 대답 소리가 나오고 있는 중
+  let speakingEndTimer = null;
+
+  function setSpeaking(on) {
+    if (speaking === on) return;
+    speaking = on;
+    try { onSpeaking(on); } catch (e) { log(`onSpeaking 오류: ${e.message}`); }
+  }
 
   function sendSpeakerChunk(chunk) {
     const header = Buffer.alloc(HEADER_SIZE);
@@ -133,14 +143,27 @@ function startBridgeSerial({ portPath, log = console.log, debug = false, ...hand
     if (!speakerQueue.length) {
       clearInterval(speakerTimer);
       speakerTimer = null;
+      // 안경 버퍼에 남은 소리가 다 나올 때까지 기다렸다가 "말하기 끝"을 알린다
+      const wait = Math.max(0, speakerNextAt - now) + SPEAKER_TAIL_MS;
+      clearTimeout(speakingEndTimer);
+      speakingEndTimer = setTimeout(() => setSpeaking(false), wait);
       speakerNextAt = 0;
       return;
     }
     if (!speakerNextAt || speakerNextAt < now) speakerNextAt = now;
     while (speakerQueue.length && speakerNextAt - now < SPEAKER_LEAD_MS) {
+      clearTimeout(speakingEndTimer);
+      setSpeaking(true);
       sendSpeakerChunk(speakerQueue.shift());
       speakerNextAt += SPEAKER_CHUNK_MS;
     }
+  }
+
+  // 안경에 한 줄 명령을 보낸다. (예: "TALK", "WING SWING") 브릿지 보드가 그대로 안경에 전달한다.
+  // 소리 프레임 사이에 한 번의 write로 들어가므로 프레임이 섞이지 않는다. 줄은 15글자 이하여야 한다.
+  function sendCommand(line) {
+    if (!connected) return;
+    child.stdin.write(Buffer.from(String(line).replace(/[\r\n]/g, '') + '\n'));
   }
 
   // pcm: Gemini 대답 소리 조각 (24kHz, 16비트, 모노)
@@ -155,7 +178,7 @@ function startBridgeSerial({ portPath, log = console.log, debug = false, ...hand
   }
   process.on('exit', () => { try { child.kill(); } catch {} });
 
-  return { stop() { try { child.kill(); } catch {} }, sendAudio };
+  return { stop() { try { child.kill(); } catch {} }, sendAudio, sendCommand };
 }
 
 module.exports = { startBridgeSerial };
