@@ -34,7 +34,7 @@
 | 컨트롤러 | 보드에 올리는 코드 | `firmware/controller/` | (미정) |
 | 서보 | 보드에 올리는 코드 | `firmware/servo/` | `jooyeonpark822` (lane-B) |
 | 서버 | 노트북 서버 코드 | `server/*.js`, `server/*.py` | (미정). 단 lane 작업에 쓰는 파일은 아래 표를 따른다 |
-| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/partner.js`, `server/coaching.js` | `jooyeonpark822` (lane-A) |
+| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/winkPersonas.js`, `server/partner.js`, `server/coaching.js` | `jooyeonpark822` (lane-A) |
 | 웹 화면 | 웹 화면 코드 | `server/public/index.html` | (미정). 서보 시험 버튼(#9)만 `jooyeonpark822` |
 | 호출어·모델 | 노트북 서버 코드 | `server/wakeword.py`, `server/wakeDetector.js`, `server/train_verifier.py`, `models/` | (미정) |
 
@@ -114,6 +114,9 @@
 | `/ask` | POST | 글자로 질문(시험용) |
 | `/servo/test?action=nod\|shake\|lookup\|home\|wing-slow\|wing-fast\|wing-stop` | POST | 안경 모터 시험 버튼. 서버가 브릿지를 거쳐 안경에 `ANGLE1`/`ANGLE2`/`WING *` 명령을 보낸다. 답하는 중에도 누르면 움직인다(답하며 움직이던 동작은 멈춘다). 브릿지가 없으면 409, 알 수 없는 동작이면 400 |
 | `/scenario?id=playlist\|charm\|pairing\|topics\|wink\|hearts\|ments\|flutter\|shy\|mission\|megi\|megi_yes\|megi_no\|more` | POST | 웹 화면 "시나리오별 버튼". 말하는 버튼은 정해 둔 문장(`SCENARIOS`의 prompt)을 Gemini에게 보내 짧게 귓속말로 대답하게 하고(조용하고 차분한 말투(지침 `WHISPER_TONE`을 `hint`로 전달)로 하고 소리는 `WHISPER_GAIN`배로 줄여 소리는 안경 스피커, 글자는 응답 `text`와 대화 기록), 모터 버튼(페어링·윙크·하트·설렐 때·부끄러울 때)은 눈 화면이 아직 없어 모터/삑 소리로 대신한다. 말하는 버튼은 WINK가 `idle`이 아니면 409, 모터 버튼은 브릿지가 없으면 409, 알 수 없는 id면 400 |
+| `/persona` | GET | 윙맨 성격 3종 목록과 지금 선택 `{ current, list: [{id, name, voice, line}] }` |
+| `/persona?id=cool\|soft\|witty` | POST | 윙맨 성격 선택. 이후 모든 Gemini 대답(음성, 글자, 시나리오별 버튼)에 그 목소리와 말투가 적용된다. 기본은 `soft`. 서버를 다시 켜면 기본값으로 돌아간다 |
+| `/persona/preview?id=cool\|soft\|witty` | POST | 그 성격의 예시 대사를 그 목소리로 안경 스피커에 들려준다 (대화 기록에는 안 남김). 브릿지가 없으면 409, WINK가 `idle`이 아니면 409 |
 | `/history/clear` | POST | 대화 기록 지우기 |
 | `/collect/start?label=pos\|neg`, `/collect/stop` | POST | 호출어 녹음 모으기 |
 
@@ -124,16 +127,17 @@
 | `server/server.js` | `emit` | 웹 화면으로 이벤트 보내기 |
 | `server/bridgeSerial.js` | `startBridgeSerial`, `sendAudio`, `sendCommand`, `onSpeaking` | 브릿지 시리얼에서 프레임 읽기 (`serialReader.py` 사용). `sendAudio`는 Gemini 대답 소리를 안경 스피커로 보내기. `sendCommand`는 안경에 한 줄 명령 보내기. `onSpeaking(on)`은 안경 스피커에서 대답이 나오기 시작/끝날 때 불리는 핸들러 |
 | `server/voiceSession.js` | `createVoiceSession` | 듣기(idle -> listening -> thinking) 상태 관리 |
-| `server/geminiLive.js` | `askGemini`, `startLiveTurn`, `buildSystemText`, `SYSTEM_INSTRUCTION` | Gemini Live 호출과 말투 지침 |
+| `server/geminiLive.js` | `askGemini`, `startLiveTurn`, `buildSystemText`, `speechConfigFor`, `SYSTEM_INSTRUCTION` | Gemini Live 호출과 말투 지침 |
 | `server/coaching.js` | `onAudio`, `buildCoachingText` | 말소리/침묵 측정과 코칭 규칙 |
 | `server/personas.js` | `buildPersonaText` | 두 사람 페르소나를 지침에 붙이기 |
+| `server/winkPersonas.js` | `list`, `get`, `getCurrent`, `setCurrent`, `buildStyleText` | 윙맨 성격 3종(시원시원하고 털털한 `cool`=Aoede, 부드럽고 세심한 `soft`=Achird, 재치 있고 웃긴 `witty`=Zephyr). 목소리(`voiceConfig`)와 말투 지침을 `geminiLive.js`가 가져다 쓴다. 소리 빠르기는 지침으로 조금 빠르게 부탁한다 |
 | `server/conversationHistory.js` | `load`, `save` | 대화 기록 저장 (`history.json`) |
 | `server/wakeDetector.js` | `createWakeDetector` | 호출어("윙크야") 감지 |
 | `server/collector.js` | `createCollector` | 호출어 녹음 모으기 |
 
 ### 4.7 웹 화면 id (`server/public/index.html`)
 
-`how`, `status`, `label`, `lamp`, `lamp-text`, `info`, `heard`, `answer`, `cam`, `sound`, `hist-count`, `hist-clear`, `history`, `collect-box`, `rec-pos`, `rec-neg`, `rec-info`, `form`, `q`, `ask`, `out`, `servo-test`
+`how`, `status`, `label`, `lamp`, `lamp-text`, `info`, `heard`, `answer`, `cam`, `sound`, `hist-count`, `hist-clear`, `history`, `collect-box`, `rec-pos`, `rec-neg`, `rec-info`, `persona`, `persona-cards`, `persona-line`, `persona-preview`, `persona-apply`, `persona-info`, `form`, `q`, `ask`, `out`, `servo-test`
 
 ### 4.8 환경 변수 (`server/.env`)
 

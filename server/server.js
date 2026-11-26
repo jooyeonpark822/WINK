@@ -2,6 +2,7 @@
 // 결과는 웹 화면(http://localhost:3000)에 글자와 소리로 보여준다.
 // 실행: node server.js   (포트: PORT=3000)
 // 글자로 시험: curl -X POST localhost:3000/ask -H "Content-Type: application/json" --data-binary @질문.json
+const winkPersonas = require('./winkPersonas'); // 윙맨 성격 3종 (목소리와 말투)
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -245,6 +246,26 @@ const server = http.createServer((req, res) => {
     else if (!runMotor(action)) { status = 400; error = `알 수 없는 동작입니다: ${action}`; }
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify(error ? { ok: false, error } : { ok: true, action }));
+  }
+
+  // 윙맨 성격: GET /persona (목록과 지금 선택), POST /persona?id=cool|soft|witty (선택), POST /persona/preview?id=... (예시 대사를 그 목소리로 안경 스피커에 들려주기)
+  if (url === '/persona' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ current: winkPersonas.getCurrent().id, list: winkPersonas.list() }));
+  }
+  if ((url === '/persona' || url === '/persona/preview') && req.method === 'POST') {
+    const id = new URL(req.url, 'http://x').searchParams.get('id');
+    const p = winkPersonas.get(id);
+    const json = (status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
+    if (!p) return json(400, { ok: false, error: '알 수 없는 성격입니다.' });
+    if (url === '/persona') { winkPersonas.setCurrent(id); return json(200, { ok: true, current: id }); }
+    if (!bridgeStatus.serial) return json(409, { ok: false, error: '브릿지 보드가 연결되지 않았습니다. (소리는 안경 스피커로 나와요)' });
+    if (session.getState() !== 'idle') return json(409, { ok: false, error: 'WINK가 듣거나 답하는 중이에요. 끝난 뒤에 눌러 주세요.' });
+    // 대화 기록에는 남기지 않는다. 고른 성격이 아니라 미리 듣는 성격의 목소리와 말투를 쓴다
+    askGemini(GEMINI_API_KEY, { text: `다음 문장을 한 글자도 바꾸지 말고 그대로 한 번만 말해줘: ${p.line}`, persona: p }, { onOutputAudio: (pcm) => { if (bridge) bridge.sendAudio(pcm); } })
+      .then(() => json(200, { ok: true, line: p.line }))
+      .catch((err) => json(502, { ok: false, error: err.message }));
+    return;
   }
 
   // 시나리오별 버튼: POST /scenario?id=playlist|charm|...  (SCENARIOS 참고)
