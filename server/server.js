@@ -160,20 +160,19 @@ async function askAndSpeak(text, hint, gain = 1, image = null) {
 }
 
 // ---- 시나리오별 버튼 (웹 화면, 모터 시험 아래) ----
-// kind 'gemini': prompt를 Gemini에게 보내 귓속말처럼 짧게 대답하게 한다 (소리는 안경 스피커, 글자는 화면). 대답이 길면 브릿지가 막힐 수 있어 짧게 시킨다.
+// kind 'gemini': prompt는 그 상황을 말로 물을 때의 대표 질문 한 줄이다. 답하는 방식(두 문장, 첫 문장 고정 등)은 scenarioReplies.js 한 곳에만 있다 (소리는 안경 스피커, 글자는 화면). 귓속말 톤과 작은 소리는 아래 WHISPER_TONE, WHISPER_GAIN이 맡는다.
 // kind 'motor': 안경에 눈 화면이 아직 없어서 모터/삑 소리로 대신 표현한다. run()이 true를 돌려주면 성공
 const SCENE_DEG = 5;  // 시나리오별 버튼에서 머리(팬·틸트)가 움직이는 폭. 약간씩만
 // 귓속말 톤: 목소리 말투는 지침(hint)으로 알려 준다. 시나리오별 버튼의 말하는 대답에 쓴다
 const WHISPER_TONE = '지금은 상대 몰래 사용자 귀에만 들리게 하는 귓속말 상황이야. 소리 크기는 내가 따로 줄여 줄 테니 속삭이거나 숨소리를 내지 말고, 목소리 톤, 말투, 성격, 억양은 위에서 정한 윙맨 성격 그대로 자연스럽게 말해.';
 const WHISPER_GAIN = 0.45;  // 귓속말 대답은 소리를 이 비율로 줄여서 안경 스피커로 보낸다 (1이면 그대로)
-const WHISPER = '귓속말하듯 짧게, 두 문장 안으로 말해줘. ';
 const SCENARIOS = {
-  playlist: { kind: 'gemini', prompt: WHISPER + '지금 데이트 직전에 상대를 기다리는 중이야. 상대가 나를 떠올리며 고른 플레이리스트라는 설정으로, 노래 하나만 골라서 제목과 가수를 알려줘.' },
-  charm: { kind: 'gemini', prompt: WHISPER + '지금까지 알고 있는 상대 정보를 바탕으로 상대의 매력 포인트를 하나만 알려줘. 모르는 건 지어내지 마.' },
+  playlist: { kind: 'gemini', prompt: '상대 기다리는 중인데 상대가 고른 플레이리스트 뭐야?' },
+  charm: { kind: 'gemini', prompt: '상대 매력 포인트 알려줘' },
   pairing: { kind: 'motor', label: '페어링 신호(삑 + 끄덕)', run: () => { bridge.sendCommand('BEEP');
     fromHome(() => animate(1600, (t) => ({ pan: PAN_HOME, tilt: TILT_HOME + SCENE_DEG * (0.5 - 0.5 * Math.cos(2 * Math.PI * t / 800)) }), () => setPose(PAN_HOME, TILT_HOME, true)));
     return true; } },
-  topics: { kind: 'gemini', prompt: WHISPER + '지금 대화가 끊겨서 어색해. 이어갈 만한 대화 주제 4~5개를 각각 열 글자 안팎으로만 알려줘.' },
+  topics: { kind: 'gemini', prompt: '대화가 끊겨서 어색해. 대화 주제 추천해 줘' },
   wink: { kind: 'motor', label: '윙크(고개를 살짝 갸웃)', run: () => {
     fromHome(() => animate(900, (t) => ({ pan: PAN_HOME + PAN_RIGHT * SCENE_DEG * Math.sin(Math.PI * t / 900), tilt: TILT_HOME + SCENE_DEG * Math.sin(Math.PI * t / 900) }), () => setPose(PAN_HOME, TILT_HOME, true)));
     return true; } },
@@ -181,7 +180,7 @@ const SCENARIOS = {
     bridge.sendCommand(`WING SPEED ${WING_FAST}`); bridge.sendCommand('WING SWING');
     setTimeout(() => bridge && bridge.sendCommand('WING HOME'), 3000);
     return true; } },
-  ments: { kind: 'gemini', prompt: WHISPER + '지금 상대에게 해볼 만한 플러팅 멘트를 하나만 제안해줘. 반드시 "이렇게 말해봐" 하고 알려주는 식으로, 먼저 "이렇게 말해봐"라고 한 뒤 상대에게 건넬 말을 한 문장으로 들려줘. 예를 들면 "이렇게 말해봐. 대화하다 보니까 시간이 훌쩍 갔네. 너랑 있으면 정말 즐거워." 같은 느낌이야. 과하거나 무례하지 않게.' },
+  ments: { kind: 'gemini', prompt: '상대한테 할 플러팅 멘트 알려줘' },
   flutter: { kind: 'motor', label: '설렐 때 빠른 날갯짓', run: () => {
     bridge.sendCommand(`WING SPEED ${WING_FAST}`); bridge.sendCommand('WING SWING');
     setTimeout(() => bridge && bridge.sendCommand('WING HOME'), 2500);
@@ -190,13 +189,13 @@ const SCENARIOS = {
     moveTo(PAN_HOME, TILT_HOME + SCENE_DEG, 500, () => animate(1800, (t) => ({ pan: PAN_HOME + SCENE_DEG * Math.sin(2 * Math.PI * t / 600), tilt: TILT_HOME + SCENE_DEG }),
       () => moveTo(PAN_HOME, TILT_HOME, 600)));
     return true; } },
-  partner_data: { kind: 'gemini', prompt: WHISPER + '지금 상대가 화장실에 갔어. 반드시 "상대방이 화장실 갔구나? 그럼 내가 알려줄게 있어."로 말을 시작하고, 이어서 상대 디바이스와 페어링된 데이터를 보고 상대가 나의 어떤 행동이나 말에 설렜는지와 상대가 나를 얼마나 호감으로 보고 있는지 알려줘. 호감을 단정하지 말고 근거 한두 가지만 짚어서 말해줘. 시작 문장은 한 글자도 바꾸지 마.' },  // 상대 디바이스 데이터는 아직 없어서 coaching.js의 시연용 데이터 규칙(SIMULATE_DATA)으로 말한다
-  mission: { kind: 'gemini', prompt: WHISPER + '오프라인 연프 미션이야. 나에게만 주는 비밀 미션 하나를 알려주고, 상대는 다른 비밀 미션을 받았으며 미션을 먼저 해내는 승자에게 데이트 우선권이 있다고 말해줘.' },
-  megi: { kind: 'gemini', prompt: WHISPER + '메기(데이트에 끼어드는 제3의 인물)와의 데이트를 나에게 귓속말로 제안하고, 수락할지는 앱에서 확인하라고 말해줘.' },
-  megi_yes: { kind: 'gemini', prompt: WHISPER + '메기와의 데이트를 수락했어. 짧게 응원해줘.' },
-  megi_no: { kind: 'gemini', prompt: WHISPER + '메기와의 데이트를 거절했어. 짧게 한마디 해줘.' },
-  flirt: { kind: 'gemini', camera: true, prompt: WHISPER + '저 사람한테 플러팅하고 싶어.' },  // 안경 카메라가 마지막으로 찍은 사진을 함께 보낸다 (플러팅 코치 지침: flirtCoach.js)
-  more: { kind: 'gemini', prompt: WHISPER + '데이트가 끝나기 직전이야. 추가 데이트를 할지 나에게 한 문장으로 물어봐줘.' },
+  partner_data: { kind: 'gemini', prompt: '상대 화장실 갔어. 상대가 내 어떤 행동이나 말에 설렜는지, 나한테 호감이 얼마나 있는지 알려줘' },  // 상대 디바이스 데이터는 아직 없어서 coaching.js의 시연용 데이터 규칙(SIMULATE_DATA)으로 말한다
+  mission: { kind: 'gemini', prompt: '비밀 미션 줘' },
+  megi: { kind: 'gemini', prompt: '메기랑 데이트할래?' },
+  megi_yes: { kind: 'gemini', prompt: '메기와의 데이트를 수락했어' },
+  megi_no: { kind: 'gemini', prompt: '메기와의 데이트를 거절했어' },
+  flirt: { kind: 'gemini', camera: true, prompt: '저 사람한테 플러팅하고 싶어.' },  // 안경 카메라가 마지막으로 찍은 사진을 함께 보낸다 (플러팅 코치 지침: flirtCoach.js)
+  more: { kind: 'gemini', prompt: '데이트 끝나기 직전이야. 한 번 더 만날지 나한테 물어봐줘' },
 };
 
 // ---- 브릿지 보드 (USB 시리얼) ----
@@ -281,7 +280,8 @@ const server = http.createServer((req, res) => {
       return json(200, { ok: true, text: sc.label });
     }
     if (session.getState() !== 'idle') return json(409, { ok: false, error: 'WINK가 듣거나 답하는 중이에요. 끝난 뒤에 눌러 주세요.' });
-    askAndSpeak(sc.prompt, WHISPER_TONE, WHISPER_GAIN, sc.camera ? session.getFrame() : null).then((answer) => json(200, { ok: true, text: answer })).catch((err) => json(502, { ok: false, error: err.message }));
+    // 카메라 버튼은 귓속말 지침을 붙이면 사진 속 사람을 못 알아봐서("안 보여") 지침 없이 소리만 작게 한다
+    askAndSpeak(sc.prompt, sc.camera ? undefined : WHISPER_TONE, WHISPER_GAIN, sc.camera ? session.getFrame() : null).then((answer) => json(200, { ok: true, text: answer })).catch((err) => json(502, { ok: false, error: err.message }));
     return;
   }
 
