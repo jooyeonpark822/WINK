@@ -190,6 +190,7 @@ const SCENARIOS = {
     moveTo(PAN_HOME, TILT_HOME + SCENE_DEG, 500, () => animate(1800, (t) => ({ pan: PAN_HOME + SCENE_DEG * Math.sin(2 * Math.PI * t / 600), tilt: TILT_HOME + SCENE_DEG }),
       () => moveTo(PAN_HOME, TILT_HOME, 600)));
     return true; } },
+  partner_data: { kind: 'gemini', prompt: WHISPER + '지금 상대가 화장실에 갔어. 반드시 "상대방이 화장실 갔구나? 그럼 내가 알려줄게 있어."로 말을 시작하고, 이어서 상대 디바이스와 페어링된 데이터를 보고 상대가 나의 어떤 행동이나 말에 설렜는지와 상대가 나를 얼마나 호감으로 보고 있는지 알려줘. 호감을 단정하지 말고 근거 한두 가지만 짚어서 말해줘. 시작 문장은 한 글자도 바꾸지 마.' },  // 상대 디바이스 데이터는 아직 없어서 coaching.js의 시연용 데이터 규칙(SIMULATE_DATA)으로 말한다
   mission: { kind: 'gemini', prompt: WHISPER + '오프라인 연프 미션이야. 나에게만 주는 비밀 미션 하나를 알려주고, 상대는 다른 비밀 미션을 받았으며 미션을 먼저 해내는 승자에게 데이트 우선권이 있다고 말해줘.' },
   megi: { kind: 'gemini', prompt: WHISPER + '메기(데이트에 끼어드는 제3의 인물)와의 데이트를 나에게 귓속말로 제안하고, 수락할지는 앱에서 확인하라고 말해줘.' },
   megi_yes: { kind: 'gemini', prompt: WHISPER + '메기와의 데이트를 수락했어. 짧게 응원해줘.' },

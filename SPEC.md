@@ -113,7 +113,7 @@
 | `/frame.jpg` | GET | 가장 최근 카메라 사진 |
 | `/ask` | POST | 글자로 질문(시험용) |
 | `/servo/test?action=nod\|shake\|lookup\|home\|wing-slow\|wing-fast\|wing-stop` | POST | 안경 모터 시험 버튼. 서버가 브릿지를 거쳐 안경에 `ANGLE1`/`ANGLE2`/`WING *` 명령을 보낸다. 답하는 중에도 누르면 움직인다(답하며 움직이던 동작은 멈춘다). 브릿지가 없으면 409, 알 수 없는 동작이면 400 |
-| `/scenario?id=playlist\|charm\|pairing\|topics\|wink\|hearts\|ments\|flutter\|shy\|mission\|megi\|megi_yes\|megi_no\|more\|flirt` | POST | 웹 화면 "시나리오별 버튼". 말하는 버튼은 정해 둔 문장(`SCENARIOS`의 prompt)을 Gemini에게 보내 짧게 귓속말로 대답하게 하고(조용하고 차분한 말투(지침 `WHISPER_TONE`을 `hint`로 전달)로 하고 소리는 `WHISPER_GAIN`배로 줄여 소리는 안경 스피커, 글자는 응답 `text`와 대화 기록), `flirt`는 안경 카메라가 마지막으로 찍은 사진을 함께 보낸다(플러팅 코치). 모터 버튼(페어링·윙크·하트·설렐 때·부끄러울 때)은 눈 화면이 아직 없어 모터/삑 소리로 대신한다. 말하는 버튼은 WINK가 `idle`이 아니면 409, 모터 버튼은 브릿지가 없으면 409, 알 수 없는 id면 400 |
+| `/scenario?id=playlist\|charm\|pairing\|topics\|wink\|hearts\|ments\|flutter\|shy\|mission\|megi\|megi_yes\|megi_no\|partner_data\|more\|flirt` | POST | 웹 화면 "시나리오별 버튼". 말하는 버튼은 정해 둔 문장(`SCENARIOS`의 prompt)을 Gemini에게 보내 짧게 귓속말로 대답하게 하고(조용하고 차분한 말투(지침 `WHISPER_TONE`을 `hint`로 전달)로 하고 소리는 `WHISPER_GAIN`배로 줄여 소리는 안경 스피커, 글자는 응답 `text`와 대화 기록), `flirt`는 안경 카메라가 마지막으로 찍은 사진을 함께 보낸다(플러팅 코치). 모터 버튼(페어링·윙크·하트·설렐 때·부끄러울 때)은 눈 화면이 아직 없어 모터/삑 소리로 대신한다. 말하는 버튼은 WINK가 `idle`이 아니면 409, 모터 버튼은 브릿지가 없으면 409, 알 수 없는 id면 400 |
 | `/persona` | GET | 윙맨 성격 3종 목록과 지금 선택 `{ current, list: [{id, name, voice, line}] }` |
 | `/persona?id=cool\|soft\|witty` | POST | 윙맨 성격 선택. 이후 모든 Gemini 대답(음성, 글자, 시나리오별 버튼)에 그 목소리와 말투가 적용된다. 기본은 `soft`. `server/wink_persona.json`에 저장되어 서버를 다시 켜도 이어진다(git에는 안 올라감) |
 | `/persona/preview?id=cool\|soft\|witty` | POST | 그 성격의 예시 대사를 그 목소리로 안경 스피커에 들려준다 (대화 기록에는 안 남김). 브릿지가 없으면 409, WINK가 `idle`이 아니면 409 |
