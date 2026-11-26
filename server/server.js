@@ -158,11 +158,11 @@ async function askAndSpeak(text, hint, gain = 1) {
   return answer;
 }
 
-// ---- 상황 버튼 (웹 화면, 모터 시험 아래) ----
+// ---- 시나리오별 버튼 (웹 화면, 모터 시험 아래) ----
 // kind 'gemini': prompt를 Gemini에게 보내 귓속말처럼 짧게 대답하게 한다 (소리는 안경 스피커, 글자는 화면). 대답이 길면 브릿지가 막힐 수 있어 짧게 시킨다.
 // kind 'motor': 안경에 눈 화면이 아직 없어서 모터/삑 소리로 대신 표현한다. run()이 true를 돌려주면 성공
-const SCENE_DEG = 5;  // 상황 버튼에서 머리(팬·틸트)가 움직이는 폭. 약간씩만
-// 귓속말 톤: 목소리 말투는 지침(hint)으로 알려 준다. 상황 버튼의 말하는 대답에 쓴다
+const SCENE_DEG = 5;  // 시나리오별 버튼에서 머리(팬·틸트)가 움직이는 폭. 약간씩만
+// 귓속말 톤: 목소리 말투는 지침(hint)으로 알려 준다. 시나리오별 버튼의 말하는 대답에 쓴다
 const WHISPER_TONE = '지금은 상대 몰래 사용자 귀에만 들리게 하는 조용한 귓속말 상황이야. 평소 목소리 그대로 자연스럽고 차분하게, 조금 낮고 부드럽게 말해. 속삭이는 소리나 숨소리를 억지로 내지 말고, 또렷한 발음은 그대로 유지해.';
 const WHISPER_GAIN = 0.45;  // 귓속말 대답은 소리를 이 비율로 줄여서 안경 스피커로 보낸다 (1이면 그대로)
 const WHISPER = '귓속말하듯 짧게, 두 문장 안으로 말해줘. ';
@@ -247,7 +247,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify(error ? { ok: false, error } : { ok: true, action }));
   }
 
-  // 상황 버튼: POST /scenario?id=playlist|charm|...  (SCENARIOS 참고)
+  // 시나리오별 버튼: POST /scenario?id=playlist|charm|...  (SCENARIOS 참고)
   if (url === '/scenario' && req.method === 'POST') {
     const sc = SCENARIOS[new URL(req.url, 'http://x').searchParams.get('id')];
     const json = (status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };

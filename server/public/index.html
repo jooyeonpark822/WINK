@@ -132,7 +132,7 @@
   </div>
 
   <div id="scenes">
-    <h2>상황 버튼 (시험용)</h2>
+    <h2>시나리오별 버튼 (시험용)</h2>
     <div class="small">상황마다 WINK의 행동을 바로 실행해 봐요. 말하는 버튼은 소리는 안경 스피커로, 글자는 아래에 나와요. (WINK가 듣거나 답하는 중에는 눌러도 막혀요.)</div>
 
     <h3>데이트 직전 상대방을 기다릴 때</h3>
@@ -365,7 +365,7 @@ document.querySelectorAll('#servo-test button[data-action]').forEach((b) => {
   };
 });
 
-// ---- 상황 버튼 ----
+// ---- 시나리오별 버튼 ----
 document.querySelectorAll('#scenes button[data-scene]').forEach((b) => {
   b.onclick = async () => {
     const out = $('scene-out');
