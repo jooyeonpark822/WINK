@@ -67,7 +67,7 @@ constexpr int WING_SPAN_US = 400;      // 속도 100일 때 정지 값에서 벗
 
 // 날개 모터를 "각도"로 움직이기: 이 모터에는 각도 센서가 없어서 돌린 시간으로 각도를 추정한다. (오래 돌리면 오차가 쌓이니 WING ZERO로 다시 맞춘다)
 // 명령: WING SWING (영점에서 -90 <-> +90도를 계속 오감), WING TURN n (n도 돌고 멈춤), WING SPEED n (각도로 움직일 때 속도 10~100, 90도 시간은 속도에 반비례로 환산),
-//       WING CAL ms (지금 속도에서 90도 도는 시간), WING ZERO (지금 위치를 0도로), WING POS (추정 각도 출력)
+//       WING CAL ms (지금 속도에서 90도 도는 시간), WING ZERO (지금 위치를 0도로), WING HOME (추정 각도가 0이 되도록 돌아감), WING POS (추정 각도 출력)
 // 양수 방향 = WING 양수 속도로 도는 방향이다.
 constexpr int WING_ANGLE_SPEED = 50;          // 각도로 움직일 때 쓰는 기본 속도 (WING n의 n과 같은 크기). WING SPEED n으로 바꿀 수 있다
 constexpr int WING_SWING_RANGE = 90;          // 영점에서 좌우로 오가는 각도
@@ -382,6 +382,11 @@ bool handleServoCommand(const char* line) {
   } else if (strncmp(cmd, "WING CAL ", 9) == 0) {
     wingMsPer90 = constrain(atoi(cmd + 9), 50, 5000);
     Serial.printf("OK WING CAL %lums/90도\n", (unsigned long)wingMsPer90);
+  } else if (strcmp(cmd, "WING HOME") == 0) {
+    wingAbort();  // 오가기를 끝내고, 추정 각도가 영점이 되도록 반대로 돌아간다
+    int back = -(int)lroundf(wingPosDeg);
+    wingStartTurn(back);
+    Serial.printf("OK WING HOME (%d도 돌아감)\n", back);
   } else if (strcmp(cmd, "WING ZERO") == 0) {
     wingAbort();
     wingPosDeg = 0;

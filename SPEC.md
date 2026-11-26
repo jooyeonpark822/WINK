@@ -94,9 +94,11 @@
 | 노트북 -> 안경 (서보) | `ANGLE1 n`, `ANGLE2 n` | 틸트(D0) 또는 팬(D1)만 n도(0~180)로. `STOP`, 부팅, `TEST` 끝의 영점은 틸트 0도, 팬 90도 |
 | 노트북 -> 안경 (스피커) | `BEEP` | 시험음 (880Hz, 0.4초) |
 | 노트북 -> 안경 (날개 톱니, 360도 연속 회전형 서보) | `WING n` (-100~100), `WING STOP`, `WING TRIM n` | 속도로 회전(0 = 정지), 정지, 정지 위치 보정(-200~200us) |
-| | `WING SWING`, `WING TURN n`, `WING SPEED n`, `WING CAL ms`, `WING ZERO`, `WING POS` | 각도로 움직이기. 이 모터는 각도 센서가 없어서 돌린 시간으로 추정한다. 영점에서 -90 <-> +90도 오가기, n도 돌기, 속도(10~100), 90도 도는 시간 보정, 지금 위치를 0도로, 추정 각도 |
+| | `WING SWING`, `WING TURN n`, `WING SPEED n`, `WING CAL ms`, `WING ZERO`, `WING HOME`, `WING POS` | 각도로 움직이기. 이 모터는 각도 센서가 없어서 돌린 시간으로 추정한다. 영점에서 -90 <-> +90도 오가기, n도 돌기, 속도(10~100), 90도 도는 시간 보정, 지금 위치를 0도로, 추정 각도가 0이 되도록 돌아가기, 추정 각도 |
 
 안경은 위 서보 명령(`TALK`, `STOP`, `TEST`, `ANGLE n` 포함)과 `BEEP`을 USB 시리얼과 브릿지(데이터 포트) 양쪽으로 받는다. `ANGLE1`/`ANGLE2`는 서보 보드(`firmware/servo`)에도 있다.
+
+**대답할 때 모터 움직이기:** 서버는 Gemini 대답 소리가 안경 스피커로 나가기 시작하면 안경에 `TALK`과 `WING SWING`을 보내고, 마지막 소리까지 재생이 끝나면(+0.3초) `STOP`과 `WING HOME`을 보낸다. 음성 대화와 글자 질문(`/ask`) 모두 같다. 명령은 `server/bridgeSerial.js`의 `sendCommand`로 보낸다. (줄 명령은 15글자 이하)
 
 ### 4.4 서버 -> 웹 화면 (`GET /events`, SSE)
 
@@ -118,7 +120,7 @@
 | 파일 | 이름 | 하는 일 |
 |---|---|---|
 | `server/server.js` | `emit` | 웹 화면으로 이벤트 보내기 |
-| `server/bridgeSerial.js` | `startBridgeSerial`, `sendAudio` | 브릿지 시리얼에서 프레임 읽기 (`serialReader.py` 사용). `sendAudio`는 Gemini 대답 소리를 안경 스피커로 보내기 |
+| `server/bridgeSerial.js` | `startBridgeSerial`, `sendAudio`, `sendCommand`, `onSpeaking` | 브릿지 시리얼에서 프레임 읽기 (`serialReader.py` 사용). `sendAudio`는 Gemini 대답 소리를 안경 스피커로 보내기. `sendCommand`는 안경에 한 줄 명령 보내기. `onSpeaking(on)`은 안경 스피커에서 대답이 나오기 시작/끝날 때 불리는 핸들러 |
 | `server/voiceSession.js` | `createVoiceSession` | 듣기(idle -> listening -> thinking) 상태 관리 |
 | `server/geminiLive.js` | `askGemini`, `startLiveTurn`, `buildSystemText`, `SYSTEM_INSTRUCTION` | Gemini Live 호출과 말투 지침 |
 | `server/coaching.js` | `onAudio`, `buildCoachingText` | 말소리/침묵 측정과 코칭 규칙 |

@@ -71,6 +71,13 @@ bridge = startBridgeSerial({
   onVideo: session.onVideo,
   onButton: (pressed) => { if (!collector.isActive()) session.onButton(pressed); },
   onStatus: (connected, port) => { bridgeStatus.serial = connected; bridgeStatus.port = port; emit('bridge', bridgeStatus); },
+  // 안경 스피커에서 대답이 나오는 동안 모터를 움직이고, 끝나면 영점으로 돌려놓는다. (안경 보드가 이 명령을 받아 처리한다)
+  onSpeaking: (on) => {
+    if (!bridge) return;
+    console.log(on ? '대답 소리가 안경 스피커로 나가기 시작 -> 모터 시작 (TALK, WING SWING)' : '대답 소리 재생이 끝남 -> 모터 정지 (STOP, WING HOME)');
+    if (on) { bridge.sendCommand('TALK'); bridge.sendCommand('WING SWING'); }  // 팬·틸트 흔들기 + 날개 오가기
+    else { bridge.sendCommand('STOP'); bridge.sendCommand('WING HOME'); }      // 팬·틸트 영점 + 날개 영점으로
+  },
 });
 
 const server = http.createServer((req, res) => {
