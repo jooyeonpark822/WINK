@@ -42,7 +42,7 @@ constexpr uint32_t BLINK_HALF_PERIOD_MS = 250;
 // 서보모터 2개 (신호선만 보드에 연결. 전원은 5V 핀, GND는 공통)
 // 카메라가 PWM 타이머 0 / 채널 0을 쓰므로, 서보는 타이머 2 / 채널 2, 3을 직접 지정해서 서로 부딪히지 않게 한다.
 // 명령(한 줄, 줄 끝 \n)은 USB 시리얼이나 브릿지로 받는다: TALK, STOP, TEST, ANGLE n, ANGLE1 n, ANGLE2 n
-// 영점(STOP, 부팅, TEST가 끝났을 때): 틸트(D0, ANGLE1) = 0도, 팬(D1, ANGLE2) = 90도
+// 영점(STOP, 부팅, TEST가 끝났을 때): 틸트(D0, ANGLE1) = SERVO1_HOME(20도), 팬(D1, ANGLE2) = 90도
 constexpr int SERVO1_PIN = D0;
 constexpr int SERVO2_PIN = D1;
 constexpr ledc_timer_t SERVO_TIMER = LEDC_TIMER_2;
@@ -51,9 +51,11 @@ constexpr ledc_channel_t SERVO2_CHANNEL = LEDC_CHANNEL_3;
 constexpr int SERVO_MIN_US = 500;
 constexpr int SERVO_MAX_US = 2400;
 constexpr int SERVO_CENTER = 90;                 // 팬(D1)의 영점(쉬는 자리)
-constexpr int SERVO1_HOME = 0;                   // 틸트(D0)의 영점. 90도에서 반시계로 90도 돌린 위치이며 서보의 한쪽 끝이라 이 자리에서는 각도가 커지는 쪽으로만 움직인다.
-constexpr int SERVO_SWING = 25;                  // 말할 때 영점에서 움직이는 폭 (팬은 좌우로, 틸트는 영점에서 한쪽으로)
-constexpr uint32_t SERVO_SWING_PERIOD_MS = 600;  // 한 번 왕복하는 시간
+constexpr int SERVO1_HOME = 20;                  // 틸트(D0)의 영점. 각도가 커질수록 틸트는 아래로 내려가고 0도가 서보의 위쪽 끝이다. 올려다보기(영점에서 위로 20도)가 딱 끝(0도)까지 가는 가장 작은 값이다. 끝에 닿아 서보가 힘을 쓰면 25로 올린다. 서버의 TILT_HOME과 같아야 한다.
+constexpr int SERVO_SWING = 10;                  // 말할 때 팬(D1)이 가운데에서 좌우로 움직이는 폭
+constexpr int SERVO1_SWING = 12;                 // 말할 때 틸트(D0)가 영점에서 아래로 움직이는 폭. 키트가 걸리면 줄인다
+constexpr uint32_t SERVO_SWING_PERIOD_MS = 3500; // 말할 때 동그라미를 한 바퀴 그리는 시간
+constexpr uint32_t SERVO_TALK_RAMP_MS = 600;     // 말하기 시작할 때 폭을 0에서 최대로 서서히 키우는 시간 (영점에서 갑자기 튀지 않게)
 constexpr uint32_t SERVO_UPDATE_MS = 15;
 constexpr uint32_t SERVO_TEST_STEP_MS = 700;
 
@@ -66,11 +68,11 @@ constexpr int WING_NEUTRAL_US = 1500;  // 정지 펄스 폭 (기본값. 서서�
 constexpr int WING_SPAN_US = 400;      // 속도 100일 때 정지 값에서 벗어나는 펄스 폭 (1100 ~ 1900us)
 
 // 날개 모터를 "각도"로 움직이기: 이 모터에는 각도 센서가 없어서 돌린 시간으로 각도를 추정한다. (오래 돌리면 오차가 쌓이니 WING ZERO로 다시 맞춘다)
-// 명령: WING SWING (영점에서 -90 <-> +90도를 계속 오감), WING TURN n (n도 돌고 멈춤), WING SPEED n (각도로 움직일 때 속도 10~100, 90도 시간은 속도에 반비례로 환산),
+// 명령: WING SWING (영점에서 -5 <-> +5도를 계속 오감 (WING_SWING_RANGE)), WING TURN n (n도 돌고 멈춤), WING SPEED n (각도로 움직일 때 속도 10~100, 90도 시간은 속도에 반비례로 환산),
 //       WING CAL ms (지금 속도에서 90도 도는 시간), WING ZERO (지금 위치를 0도로), WING HOME (추정 각도가 0이 되도록 돌아감), WING POS (추정 각도 출력)
 // 양수 방향 = WING 양수 속도로 도는 방향이다.
 constexpr int WING_ANGLE_SPEED = 50;          // 각도로 움직일 때 쓰는 기본 속도 (WING n의 n과 같은 크기). WING SPEED n으로 바꿀 수 있다
-constexpr int WING_SWING_RANGE = 90;          // 영점에서 좌우로 오가는 각도
+constexpr int WING_SWING_RANGE = 5;           // 영점에서 좌우로 오가는 각도
 constexpr uint32_t WING_SWING_PAUSE_MS = 200; // 방향을 바꾸기 전에 잠깐 쉰다 (관성 때문에 더 돌지 않게)
 constexpr uint32_t WING_DEFAULT_MS_PER_90 = 480;  // 기본 속도(50)에서 90도 도는 데 걸리는 시간의 처음 추정값. (속도 30에서 800ms로 맞춘 값을 속도 비율로 환산) WING CAL로 맞춘다
 
@@ -148,6 +150,7 @@ void writeHeader(uint8_t* out, uint8_t type, uint32_t len) {
 
 // ---- 서보 ----
 bool servoTalking = false;
+uint32_t servoTalkStartMs = 0;  // TALK을 시작한 시각
 int servoTestStep = -1;  // -1이면 TEST 중이 아님
 uint32_t servoTestStepMs = 0;
 
@@ -166,8 +169,15 @@ void servoWrite(ledc_channel_t channel, int angle) {
 }
 
 // 날개 모터: speed -100~100 (0 = 정지)
+// 정지(0)일 때는 신호(펄스) 자체를 끊는다. 연속 회전형 서보는 정지 펄스를 줘도 모터마다 정지 위치가 조금씩 달라서 서서히 돌고,
+// 그 전류가 같은 5V를 타고 앰프에 잡음("삑삑")으로 들어갈 수 있다. 신호가 없으면 서보는 움직이지 않는다.
 void wingSet(int speed) {
   wingSpeed = constrain(speed, -100, 100);
+  if (wingSpeed == 0) {
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, WING_CHANNEL, 0);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, WING_CHANNEL);
+    return;
+  }
   servoWritePulse(WING_CHANNEL, wingNeutralUs + wingSpeed * WING_SPAN_US / 100);
 }
 
@@ -180,7 +190,7 @@ int wingTurnDir = 0;           // +1 / -1
 int wingTurnDeg = 0;           // 이번에 돌 각도(양수)
 uint32_t wingTurnStartMs = 0;
 uint32_t wingTurnEndMs = 0;
-bool wingSwinging = false;     // -90 <-> +90 오가기 중
+bool wingSwinging = false;     // -5 <-> +5 오가기 중
 int wingSwingNext = -WING_SWING_RANGE;  // 다음 목표 각도
 uint32_t wingPauseUntilMs = 0;
 
@@ -225,7 +235,7 @@ void servoMoveBoth(int angle) {
   servoWrite(SERVO2_CHANNEL, angle);
 }
 
-// 두 서보를 각자의 영점으로 보낸다. 틸트(D0)는 SERVO1_HOME, 팬(D1)은 SERVO_CENTER.
+// 두 서보를 각자의 영점으로 보낸다. 틸트(D0)는 SERVO1_HOME(20도), 팬(D1)은 SERVO_CENTER(90도).
 void servoHome() {
   servoWrite(SERVO1_CHANNEL, SERVO1_HOME);
   servoWrite(SERVO2_CHANNEL, SERVO_CENTER);
@@ -335,6 +345,7 @@ bool handleServoCommand(const char* line) {
 
   if (strcmp(cmd, "TALK") == 0) {
     servoTalking = true;
+    servoTalkStartMs = millis();
     servoTestStep = -1;
     Serial.println("OK TALK");
   } else if (strcmp(cmd, "STOP") == 0) {
@@ -395,7 +406,8 @@ bool handleServoCommand(const char* line) {
     Serial.printf("OK WING POS %d도\n", (int)lroundf(wingPosDeg));
   } else if (strncmp(cmd, "WING TRIM ", 10) == 0) {
     wingNeutralUs = constrain(wingNeutralUs + atoi(cmd + 10), WING_NEUTRAL_US - 200, WING_NEUTRAL_US + 200);
-    wingSet(wingSpeed);
+    if (wingSpeed == 0) servoWritePulse(WING_CHANNEL, wingNeutralUs);  // 정지 상태에서 보정할 때는 정지 펄스를 내서 서서히 도는지 볼 수 있게 한다. WING STOP을 하면 다시 끊긴다.
+    else wingSet(wingSpeed);
     Serial.printf("OK WING TRIM neutral=%dus\n", wingNeutralUs);
   } else if (strncmp(cmd, "WING ", 5) == 0) {
     wingAbort();  // 속도로 직접 돌릴 때는 각도로 움직이는 동작을 끈다
@@ -453,10 +465,13 @@ void updateServos() {
   if (now - lastUpdate < SERVO_UPDATE_MS) return;
   lastUpdate = now;
   if (!servoTalking) return;
-  float phase = (now % SERVO_SWING_PERIOD_MS) / (float)SERVO_SWING_PERIOD_MS;
-  float wave = sinf(phase * TWO_PI);
-  servoWrite(SERVO2_CHANNEL, SERVO_CENTER + (int)(SERVO_SWING * wave));                  // 팬: 가운데에서 좌우로
-  servoWrite(SERVO1_CHANNEL, SERVO1_HOME + (int)(SERVO_SWING * (0.5f + 0.5f * wave)));   // 틸트: 영점(0도)에서 0 ~ SERVO_SWING도
+  // 동그라미: 팬은 cos, 틸트는 sin으로 위상을 90도 어긋나게 움직인다. TALK을 시작한 순간부터 한 바퀴를 센다.
+  uint32_t elapsed = now - servoTalkStartMs;
+  float phase = (elapsed % SERVO_SWING_PERIOD_MS) / (float)SERVO_SWING_PERIOD_MS;
+  float ramp = elapsed < SERVO_TALK_RAMP_MS ? (float)elapsed / SERVO_TALK_RAMP_MS : 1.0f;  // 시작할 때 폭을 서서히 키운다
+  float angle = phase * TWO_PI;
+  servoWrite(SERVO2_CHANNEL, SERVO_CENTER + (int)(ramp * SERVO_SWING * cosf(angle)));                       // 팬: 가운데에서 좌우로
+  servoWrite(SERVO1_CHANNEL, SERVO1_HOME + (int)(ramp * SERVO1_SWING * (0.5f + 0.5f * sinf(angle))));       // 틸트: 영점에서 아래로 0 ~ SERVO1_SWING도
 }
 
 bool initCamera() {
