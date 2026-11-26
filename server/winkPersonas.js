@@ -7,6 +7,9 @@ const FRIEND_STYLE = '위의 "차분하고 단정한 서비스 톤"보다 지금
 
 const PACE_NORMAL = '속도는 일상 대화보다 아주 조금 빠르게 말해.';
 
+const fs = require('fs');
+const path = require('path');
+
 const PERSONAS = {
   cool: {
     id: 'cool',
@@ -34,12 +37,26 @@ const PERSONAS = {
   },
 };
 const DEFAULT_ID = 'soft';
-let currentId = DEFAULT_ID;
+// 고른 성격은 server/wink_persona.json 에 저장해서 서버를 다시 켜도 이어진다. (git에는 올라가지 않는다: .gitignore)
+const FILE = path.join(__dirname, 'wink_persona.json');
+function load() {
+  try {
+    const id = JSON.parse(fs.readFileSync(FILE, 'utf8')).id;
+    if (PERSONAS[id]) return id;
+  } catch (e) { /* 파일이 없거나 깨졌으면 기본값 */ }
+  return DEFAULT_ID;
+}
+let currentId = load();
 
 const list = () => Object.values(PERSONAS).map(({ id, name, voice, line }) => ({ id, name, voice, line }));
 const get = (id) => PERSONAS[id] || null;
 const getCurrent = () => PERSONAS[currentId];
-function setCurrent(id) { if (!PERSONAS[id]) return false; currentId = id; return true; }
+function setCurrent(id) {
+  if (!PERSONAS[id]) return false;
+  currentId = id;
+  try { fs.writeFileSync(FILE, JSON.stringify({ id })); } catch (e) { console.log('윙맨 성격을 파일에 저장하지 못했습니다:', e.message); }  // 저장이 안 돼도 이번 실행에서는 그대로 쓴다
+  return true;
+}
 // Gemini 지침 뒤에 붙일 글
 const buildStyleText = (p = getCurrent()) => `\n\n[윙맨 성격과 말투] ${FRIEND_STYLE} ${p.style} ${p.pace}`;
 
