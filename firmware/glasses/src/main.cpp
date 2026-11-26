@@ -52,9 +52,9 @@ constexpr int SERVO_MIN_US = 500;
 constexpr int SERVO_MAX_US = 2400;
 constexpr int SERVO_CENTER = 90;                 // 팬(D1)의 영점(쉬는 자리)
 constexpr int SERVO1_HOME = 20;                  // 틸트(D0)의 영점. 각도가 커질수록 틸트는 아래로 내려가고 0도가 서보의 위쪽 끝이다. 올려다보기(영점에서 위로 20도)가 딱 끝(0도)까지 가는 가장 작은 값이다. 끝에 닿아 서보가 힘을 쓰면 25로 올린다. 서버의 TILT_HOME과 같아야 한다.
-constexpr int SERVO_SWING = 25;                  // 말할 때 팬(D1)이 가운데에서 좌우로 움직이는 폭
-constexpr int SERVO1_SWING = 45;                 // 말할 때 틸트(D0)가 영점에서 아래로 움직이는 폭. 키트가 걸리면 줄인다
-constexpr uint32_t SERVO_SWING_PERIOD_MS = 3000; // 말할 때 동그라미를 한 바퀴 그리는 시간
+constexpr int SERVO_SWING = 10;                  // 말할 때 팬(D1)이 가운데에서 좌우로 움직이는 폭
+constexpr int SERVO1_SWING = 12;                 // 말할 때 틸트(D0)가 영점에서 아래로 움직이는 폭. 키트가 걸리면 줄인다
+constexpr uint32_t SERVO_SWING_PERIOD_MS = 3500; // 말할 때 동그라미를 한 바퀴 그리는 시간
 constexpr uint32_t SERVO_TALK_RAMP_MS = 600;     // 말하기 시작할 때 폭을 0에서 최대로 서서히 키우는 시간 (영점에서 갑자기 튀지 않게)
 constexpr uint32_t SERVO_UPDATE_MS = 15;
 constexpr uint32_t SERVO_TEST_STEP_MS = 700;
@@ -68,11 +68,11 @@ constexpr int WING_NEUTRAL_US = 1500;  // 정지 펄스 폭 (기본값. 서서�
 constexpr int WING_SPAN_US = 400;      // 속도 100일 때 정지 값에서 벗어나는 펄스 폭 (1100 ~ 1900us)
 
 // 날개 모터를 "각도"로 움직이기: 이 모터에는 각도 센서가 없어서 돌린 시간으로 각도를 추정한다. (오래 돌리면 오차가 쌓이니 WING ZERO로 다시 맞춘다)
-// 명령: WING SWING (영점에서 -90 <-> +90도를 계속 오감), WING TURN n (n도 돌고 멈춤), WING SPEED n (각도로 움직일 때 속도 10~100, 90도 시간은 속도에 반비례로 환산),
+// 명령: WING SWING (영점에서 -5 <-> +5도를 계속 오감 (WING_SWING_RANGE)), WING TURN n (n도 돌고 멈춤), WING SPEED n (각도로 움직일 때 속도 10~100, 90도 시간은 속도에 반비례로 환산),
 //       WING CAL ms (지금 속도에서 90도 도는 시간), WING ZERO (지금 위치를 0도로), WING HOME (추정 각도가 0이 되도록 돌아감), WING POS (추정 각도 출력)
 // 양수 방향 = WING 양수 속도로 도는 방향이다.
 constexpr int WING_ANGLE_SPEED = 50;          // 각도로 움직일 때 쓰는 기본 속도 (WING n의 n과 같은 크기). WING SPEED n으로 바꿀 수 있다
-constexpr int WING_SWING_RANGE = 90;          // 영점에서 좌우로 오가는 각도
+constexpr int WING_SWING_RANGE = 5;           // 영점에서 좌우로 오가는 각도
 constexpr uint32_t WING_SWING_PAUSE_MS = 200; // 방향을 바꾸기 전에 잠깐 쉰다 (관성 때문에 더 돌지 않게)
 constexpr uint32_t WING_DEFAULT_MS_PER_90 = 480;  // 기본 속도(50)에서 90도 도는 데 걸리는 시간의 처음 추정값. (속도 30에서 800ms로 맞춘 값을 속도 비율로 환산) WING CAL로 맞춘다
 
@@ -190,7 +190,7 @@ int wingTurnDir = 0;           // +1 / -1
 int wingTurnDeg = 0;           // 이번에 돌 각도(양수)
 uint32_t wingTurnStartMs = 0;
 uint32_t wingTurnEndMs = 0;
-bool wingSwinging = false;     // -90 <-> +90 오가기 중
+bool wingSwinging = false;     // -5 <-> +5 오가기 중
 int wingSwingNext = -WING_SWING_RANGE;  // 다음 목표 각도
 uint32_t wingPauseUntilMs = 0;
 

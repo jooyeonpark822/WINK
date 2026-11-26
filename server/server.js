@@ -142,6 +142,60 @@ function runMotor(action) {
 // 호출어 보정용 녹음 모으기 (웹 화면의 "호출어 보정 데이터 모으기")
 const collector = createCollector({ onChange: (s) => emit('collect', s) });
 
+// 16비트 PCM 소리를 gain배로 줄인다 (소리를 작게 들려주려고)
+function scalePcm(pcm, gain) {
+  const out = Buffer.alloc(pcm.length - (pcm.length % 2));
+  for (let i = 0; i < out.length; i += 2) out.writeInt16LE(Math.round(pcm.readInt16LE(i) * gain), i);
+  return out;
+}
+
+// 글로 물어보기: 같은 대화 기록을 쓰고, 대답 소리는 안경 스피커로 보내고, 주고받은 내용을 기록에 남긴다
+async function askAndSpeak(text, hint, gain = 1) {
+  let answer = '';
+  await askGemini(GEMINI_API_KEY, { text, hint, search: true, history: history.recent() }, { onOutputText: (t) => { answer += t; }, onOutputAudio: (pcm) => { if (bridge) bridge.sendAudio(gain === 1 ? pcm : scalePcm(pcm, gain)); } });
+  const item = history.add(text, answer);
+  if (item) emit('history', item);
+  return answer;
+}
+
+// ---- 상황 버튼 (웹 화면, 모터 시험 아래) ----
+// kind 'gemini': prompt를 Gemini에게 보내 귓속말처럼 짧게 대답하게 한다 (소리는 안경 스피커, 글자는 화면). 대답이 길면 브릿지가 막힐 수 있어 짧게 시킨다.
+// kind 'motor': 안경에 눈 화면이 아직 없어서 모터/삑 소리로 대신 표현한다. run()이 true를 돌려주면 성공
+const SCENE_DEG = 5;  // 상황 버튼에서 머리(팬·틸트)가 움직이는 폭. 약간씩만
+// 귓속말 톤: 목소리 말투는 지침(hint)으로 알려 준다. 상황 버튼의 말하는 대답에 쓴다
+const WHISPER_TONE = '지금은 상대 몰래 사용자 귀에만 들리게 하는 조용한 귓속말 상황이야. 평소 목소리 그대로 자연스럽고 차분하게, 조금 낮고 부드럽게 말해. 속삭이는 소리나 숨소리를 억지로 내지 말고, 또렷한 발음은 그대로 유지해.';
+const WHISPER_GAIN = 0.45;  // 귓속말 대답은 소리를 이 비율로 줄여서 안경 스피커로 보낸다 (1이면 그대로)
+const WHISPER = '귓속말하듯 짧게, 두 문장 안으로 말해줘. ';
+const SCENARIOS = {
+  playlist: { kind: 'gemini', prompt: WHISPER + '지금 데이트 직전에 상대를 기다리는 중이야. 상대가 나를 떠올리며 고른 플레이리스트라는 설정으로, 노래 하나만 골라서 제목과 가수를 알려줘.' },
+  charm: { kind: 'gemini', prompt: WHISPER + '지금까지 알고 있는 상대 정보를 바탕으로 상대의 매력 포인트를 하나만 알려줘. 모르는 건 지어내지 마.' },
+  pairing: { kind: 'motor', label: '페어링 신호(삑 + 끄덕)', run: () => { bridge.sendCommand('BEEP');
+    fromHome(() => animate(1600, (t) => ({ pan: PAN_HOME, tilt: TILT_HOME + SCENE_DEG * (0.5 - 0.5 * Math.cos(2 * Math.PI * t / 800)) }), () => setPose(PAN_HOME, TILT_HOME, true)));
+    return true; } },
+  topics: { kind: 'gemini', prompt: WHISPER + '지금 대화가 끊겨서 어색해. 이어갈 만한 대화 주제 4~5개를 각각 열 글자 안팎으로만 알려줘.' },
+  wink: { kind: 'motor', label: '윙크(고개를 살짝 갸웃)', run: () => {
+    fromHome(() => animate(900, (t) => ({ pan: PAN_HOME + PAN_RIGHT * SCENE_DEG * Math.sin(Math.PI * t / 900), tilt: TILT_HOME + SCENE_DEG * Math.sin(Math.PI * t / 900) }), () => setPose(PAN_HOME, TILT_HOME, true)));
+    return true; } },
+  hearts: { kind: 'motor', label: '하트 날리기(날개를 빠르게 퍼덕)', run: () => {
+    bridge.sendCommand(`WING SPEED ${WING_FAST}`); bridge.sendCommand('WING SWING');
+    setTimeout(() => bridge && bridge.sendCommand('WING HOME'), 3000);
+    return true; } },
+  ments: { kind: 'gemini', prompt: WHISPER + '지금 상대에게 해볼 만한 플러팅 멘트를 하나만 제안해줘. 반드시 "이렇게 말해봐" 하고 알려주는 식으로, 먼저 "이렇게 말해봐"라고 한 뒤 상대에게 건넬 말을 한 문장으로 들려줘. 예를 들면 "이렇게 말해봐. 대화하다 보니까 시간이 훌쩍 갔네. 너랑 있으면 정말 즐거워." 같은 느낌이야. 과하거나 무례하지 않게.' },
+  flutter: { kind: 'motor', label: '설렐 때 빠른 날갯짓', run: () => {
+    bridge.sendCommand(`WING SPEED ${WING_FAST}`); bridge.sendCommand('WING SWING');
+    setTimeout(() => bridge && bridge.sendCommand('WING HOME'), 2500);
+    return true; } },
+  shy: { kind: 'motor', label: '부끄러울 때 고개 숙이고 절레절레', run: () => {
+    moveTo(PAN_HOME, TILT_HOME + SCENE_DEG, 500, () => animate(1800, (t) => ({ pan: PAN_HOME + SCENE_DEG * Math.sin(2 * Math.PI * t / 600), tilt: TILT_HOME + SCENE_DEG }),
+      () => moveTo(PAN_HOME, TILT_HOME, 600)));
+    return true; } },
+  mission: { kind: 'gemini', prompt: WHISPER + '오프라인 연프 미션이야. 나에게만 주는 비밀 미션 하나를 알려주고, 상대는 다른 비밀 미션을 받았으며 미션을 먼저 해내는 승자에게 데이트 우선권이 있다고 말해줘.' },
+  megi: { kind: 'gemini', prompt: WHISPER + '메기(데이트에 끼어드는 제3의 인물)와의 데이트를 나에게 귓속말로 제안하고, 수락할지는 앱에서 확인하라고 말해줘.' },
+  megi_yes: { kind: 'gemini', prompt: WHISPER + '메기와의 데이트를 수락했어. 짧게 응원해줘.' },
+  megi_no: { kind: 'gemini', prompt: WHISPER + '메기와의 데이트를 거절했어. 짧게 한마디 해줘.' },
+  more: { kind: 'gemini', prompt: WHISPER + '데이트가 끝나기 직전이야. 추가 데이트를 할지 나에게 한 문장으로 물어봐줘.' },
+};
+
 // ---- 브릿지 보드 (USB 시리얼) ----
 bridge = startBridgeSerial({
   portPath: process.env.SERIAL_PORT || undefined,
@@ -188,10 +242,24 @@ const server = http.createServer((req, res) => {
     let status = 200;
     let error;
     if (!bridgeStatus.serial) { status = 409; error = '브릿지 보드가 연결되지 않았습니다.'; }
-    else if (session.getState() === 'answering') { status = 409; error = 'WINK가 답하는 중이에요. 답이 끝난 뒤에 눌러 주세요.'; }
     else if (!runMotor(action)) { status = 400; error = `알 수 없는 동작입니다: ${action}`; }
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify(error ? { ok: false, error } : { ok: true, action }));
+  }
+
+  // 상황 버튼: POST /scenario?id=playlist|charm|...  (SCENARIOS 참고)
+  if (url === '/scenario' && req.method === 'POST') {
+    const sc = SCENARIOS[new URL(req.url, 'http://x').searchParams.get('id')];
+    const json = (status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
+    if (!sc) return json(400, { ok: false, error: '알 수 없는 버튼입니다.' });
+    if (sc.kind === 'motor') {
+      if (!bridgeStatus.serial) return json(409, { ok: false, error: '브릿지 보드가 연결되지 않았습니다.' });
+      sc.run();
+      return json(200, { ok: true, text: sc.label });
+    }
+    if (session.getState() !== 'idle') return json(409, { ok: false, error: 'WINK가 듣거나 답하는 중이에요. 끝난 뒤에 눌러 주세요.' });
+    askAndSpeak(sc.prompt, WHISPER_TONE, WHISPER_GAIN).then((answer) => json(200, { ok: true, text: answer })).catch((err) => json(502, { ok: false, error: err.message }));
+    return;
   }
 
   // 호출어 보정 녹음: /collect/start?label=pos|neg , /collect/stop
@@ -231,12 +299,8 @@ const server = http.createServer((req, res) => {
       let text = '';
       try { text = String(JSON.parse(body).text || '').trim(); } catch {}
       if (!text) { res.writeHead(400); return res.end('text가 필요합니다.'); }
-      let answer = '';
       try {
-        // 글로 물어볼 때도 같은 대화 기록을 쓰고, 주고받은 내용을 기록에 남긴다
-        await askGemini(GEMINI_API_KEY, { text, search: true, history: history.recent() }, { onOutputText: (t) => { answer += t; }, onOutputAudio: (pcm) => { if (bridge) bridge.sendAudio(pcm); } });
-        const item = history.add(text, answer);
-        if (item) emit('history', item);
+        const answer = await askAndSpeak(text);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ text: answer }));
       } catch (err) {
