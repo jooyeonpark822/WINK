@@ -20,6 +20,7 @@ constexpr int MAX_DATA_CLIENTS = 4;
 constexpr int MAX_CONTROL_CLIENTS = 4;
 
 constexpr size_t SERIAL_TX_BUFFER = 16384;
+constexpr size_t SERIAL_RX_BUFFER = 16384;  // 노트북이 보낸 안경 스피커 소리를 받는 곳. 기본 256바이트는 소리 프레임(969바이트)이 한꺼번에 오면 넘친다
 constexpr uint32_t SERIAL_TX_TIMEOUT_MS = 200;  // 노트북이 안 읽으면 기다리지 않고 버린다
 
 WiFiServer dataServer(DATA_PORT);
@@ -73,6 +74,7 @@ void writeToDataClients(const uint8_t* buf, size_t n) {
 
 void setup() {
   Serial.setTxBufferSize(SERIAL_TX_BUFFER);
+  Serial.setRxBufferSize(SERIAL_RX_BUFFER);  // begin() 전에 불러야 한다
   Serial.begin(115200);
   Serial.setTxTimeoutMs(SERIAL_TX_TIMEOUT_MS);
 
@@ -120,7 +122,7 @@ void loop() {
 
   // 시리얼 -> 데이터 포트 기기
   while (Serial.available()) {
-    uint8_t buf[256];
+    uint8_t buf[1024];
     size_t n = Serial.readBytes(buf, min((size_t)Serial.available(), sizeof(buf)));
     writeToDataClients(buf, n);
   }

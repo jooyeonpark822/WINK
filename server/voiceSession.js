@@ -28,7 +28,7 @@ function rmsOf(pcm) {
 }
 
 // emit(type, data): 웹 화면으로 보낼 사건. type: state | wake | input | output | audio | frame | problem | history
-function createVoiceSession({ apiKey, wake, emit, log = console.log, minSpeechRms = NOISE_FLOOR_MIN_RMS }) {
+function createVoiceSession({ apiKey, wake, emit, log = console.log, minSpeechRms = NOISE_FLOOR_MIN_RMS, onSpeakerAudio = () => {} }) {
   let state = 'idle';
   let turn = null;
   let preRoll = [];
@@ -82,7 +82,7 @@ function createVoiceSession({ apiKey, wake, emit, log = console.log, minSpeechRm
     const t = startLiveTurn(apiKey, { image: fresh, history: history.recent() }, {
       onInputText: (text) => { heardText += text; emit('input', { text }); },
       onOutputText: (text) => { answerText += text; markReply(); emit('output', { text }); },
-      onOutputAudio: (pcm) => { if (!replyFirstAt) replyFirstAt = Date.now(); replyMs += pcm.length / 48; markReply(); emit('audio', { pcm: pcm.toString('base64') }); },
+      onOutputAudio: (pcm) => { if (!replyFirstAt) replyFirstAt = Date.now(); replyMs += pcm.length / 48; markReply(); emit('audio', { pcm: pcm.toString('base64') }); onSpeakerAudio(pcm); },
     });
     turn = t;
     t.done.then(

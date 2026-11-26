@@ -3,6 +3,7 @@
 // (node의 serialport는 Windows에서 초당 16KB쯤에서 막혀서 소리가 대부분 사라졌다. pyserial은 초당 약 780KB)
 // 프레임 형식은 firmware/glasses 와 같다: [AA 55 A5 5A] [종류 1바이트] [길이 4바이트, little-endian] [데이터]
 //   종류 1 = 카메라 JPEG 한 장, 2 = 마이크 PCM 조각(16kHz, 16비트, 모노), 3 = 컨트롤러 버튼 (데이터 1바이트: 1=누름, 0=뗌)
+//   종류 4 = 안경 스피커 소리 조각(24kHz, 16비트, 모노). 노트북 -> 안경 방향이라 이 파일이 만들어 보낸다. (sendAudio)
 // 포트는 server/.env 의 SERIAL_PORT(예: COM6)로 정할 수 있고, 없으면 Espressif(ESP32) 보드를 자동으로 찾는다.
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -15,6 +16,10 @@ const MAX_PAYLOAD = 2 * 1024 * 1024; // 이보다 크면 잘못 읽은 것으로
 const TYPE_VIDEO = 1;
 const TYPE_AUDIO = 2;
 const TYPE_BUTTON = 3;
+const TYPE_SPEAKER = 4;               // 노트북 -> 안경 스피커 소리
+const SPEAKER_CHUNK_BYTES = 960;      // 20ms 분량 (24000Hz x 2바이트 x 0.02초)
+const SPEAKER_CHUNK_MS = 20;
+const SPEAKER_LEAD_MS = 200;          // 재생 속도보다 이만큼만 앞서서 보낸다 (안경 보드의 버퍼가 넘치지 않게)
 const STATS_MS = 10000;               // 이 간격으로 받은 양을 점검한다
 const AUDIO_BYTES_PER_SEC = 32000;    // 16kHz x 16비트 모노
 const AUDIO_WARN_RATIO = 0.8;         // 소리가 기대치의 80% 아래면 경고
@@ -35,7 +40,8 @@ function startBridgeSerial({ portPath, log = console.log, debug = false, ...hand
   const args = [script];
   if (portPath) args.push('--port', portPath);
   // PYTHONIOENCODING: Windows에서 파이썬의 한글 안내가 깨지지 않게 UTF-8로 내보낸다.
-  const child = spawn(python, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+  // stdin: 안경 스피커로 보낼 프레임을 serialReader.py에 넘기는 길
+  const child = spawn(python, args, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
   let buf = Buffer.alloc(0);
   let lastWarn = '';
   let connected = false;
@@ -102,10 +108,54 @@ function startBridgeSerial({ portPath, log = console.log, debug = false, ...hand
       if (msg !== lastWarn) { lastWarn = msg; log(msg); } // 같은 안내는 한 번만
     }
   });
+  child.stdin.on('error', () => {}); // 프로그램이 끝난 뒤 쓰면 나는 오류는 무시한다
   child.on('error', (e) => log(`시리얼 읽기 프로그램을 시작하지 못했습니다: ${e.message}`));
+
+  // ---- 안경 스피커로 소리 보내기 ----
+  // Gemini는 대답 소리를 실시간보다 빠르게 몰아서 준다. 그대로 보내면 안경 보드의 버퍼가 넘치므로,
+  // 20ms 조각으로 잘라 두었다가 재생 속도에 맞춰(약 0.2초 앞서서) 내보낸다.
+  let speakerQueue = [];
+  let speakerNextAt = 0;
+  let speakerTimer = null;
+  let speakerBytesSent = 0;
+
+  function sendSpeakerChunk(chunk) {
+    const header = Buffer.alloc(HEADER_SIZE);
+    MAGIC.copy(header, 0);
+    header[4] = TYPE_SPEAKER;
+    header.writeUInt32LE(chunk.length, 5);
+    child.stdin.write(Buffer.concat([header, chunk]));
+    speakerBytesSent += chunk.length;
+  }
+
+  function pumpSpeaker() {
+    const now = Date.now();
+    if (!speakerQueue.length) {
+      clearInterval(speakerTimer);
+      speakerTimer = null;
+      speakerNextAt = 0;
+      return;
+    }
+    if (!speakerNextAt || speakerNextAt < now) speakerNextAt = now;
+    while (speakerQueue.length && speakerNextAt - now < SPEAKER_LEAD_MS) {
+      sendSpeakerChunk(speakerQueue.shift());
+      speakerNextAt += SPEAKER_CHUNK_MS;
+    }
+  }
+
+  // pcm: Gemini 대답 소리 조각 (24kHz, 16비트, 모노)
+  function sendAudio(pcm) {
+    if (!connected || !pcm || !pcm.length) return;
+    for (let i = 0; i < pcm.length; i += SPEAKER_CHUNK_BYTES) {
+      let chunk = pcm.subarray(i, Math.min(i + SPEAKER_CHUNK_BYTES, pcm.length));
+      if (chunk.length % 2) chunk = chunk.subarray(0, chunk.length - 1); // 16비트 단위로만 보낸다
+      if (chunk.length) speakerQueue.push(Buffer.from(chunk));
+    }
+    if (!speakerTimer) speakerTimer = setInterval(pumpSpeaker, SPEAKER_CHUNK_MS / 2);
+  }
   process.on('exit', () => { try { child.kill(); } catch {} });
 
-  return { stop() { try { child.kill(); } catch {} } };
+  return { stop() { try { child.kill(); } catch {} }, sendAudio };
 }
 
 module.exports = { startBridgeSerial };
