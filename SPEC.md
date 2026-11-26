@@ -34,7 +34,7 @@
 | 컨트롤러 | 보드에 올리는 코드 | `firmware/controller/` | (미정) |
 | 서보 | 보드에 올리는 코드 | `firmware/servo/` | `jooyeonpark822` (lane-B) |
 | 서버 | 노트북 서버 코드 | `server/*.js`, `server/*.py` | (미정). 단 lane 작업에 쓰는 파일은 아래 표를 따른다 |
-| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/winkPersonas.js`, `server/flirtCoach.js`, `server/partner.js`, `server/coaching.js` | `jooyeonpark822` (lane-A) |
+| AI 말투·성격 | 노트북 서버 코드 | `server/geminiLive.js`의 `SYSTEM_INSTRUCTION`, `server/personas.js`, `server/winkPersonas.js`, `server/flirtCoach.js`, `server/scenarioReplies.js`, `server/partner.js`, `server/coaching.js` | `jooyeonpark822` (lane-A) |
 | 웹 화면 | 웹 화면 코드 | `server/public/index.html` | (미정). 서보 시험 버튼(#9)만 `jooyeonpark822` |
 | 호출어·모델 | 노트북 서버 코드 | `server/wakeword.py`, `server/wakeDetector.js`, `server/train_verifier.py`, `models/` | (미정) |
 
@@ -130,6 +130,7 @@
 | `server/geminiLive.js` | `askGemini`, `startLiveTurn`, `buildSystemText`, `speechConfigFor`, `SYSTEM_INSTRUCTION` | Gemini Live 호출과 말투 지침 |
 | `server/coaching.js` | `onAudio`, `buildCoachingText` | 말소리/침묵 측정과 코칭 규칙 |
 | `server/personas.js` | `buildPersonaText` | 두 사람 페르소나를 지침에 붙이기 |
+| `server/scenarioReplies.js` | `buildScenarioRepliesText`, `SCENARIO_REPLIES_INSTRUCTION` | 시나리오별 버튼의 말하는 내용(플레이리스트, 매력 포인트, 대화 주제, 플러팅 멘트, 상대 화장실, 비밀 미션, 메기 데이트, 추가 데이트 질문)을 버튼 없이 말이나 글로 물어도 같은 방식으로 답하게 하는 지침. 버튼의 `SCENARIOS` prompt와 내용을 맞춰 둔다. 모터 버튼은 말로 시킬 수 없어 없다. `geminiLive.js`가 지침 뒤에 붙인다 |
 | `server/flirtCoach.js` | `buildFlirtText`, `FLIRT_COACH_INSTRUCTION` | "저 사람한테 플러팅하고 싶어" 때 카메라 이미지(옷, 표정, 주변)와 들린 말을 보고 행동 하나와 멘트 하나를 추천하게 하는 지침과 예시. 눈에 보이는 것만 말하고 감정·호감·외모·나이 등은 단정하지 않는다. 사람이 안 보이면 지어내지 않고 방향을 돌려 달라고 한다. `geminiLive.js`가 지침 뒤에 붙인다 |
 | `server/winkPersonas.js` | `list`, `get`, `getCurrent`, `setCurrent`, `buildStyleText` | 윙맨 성격 3종(시원시원하고 털털한 `cool`=Aoede, 부드럽고 세심한 `soft`=Achird, 재치 있고 웃긴 `witty`=Zephyr). 목소리(`voiceConfig`)와 말투 지침을 `geminiLive.js`가 가져다 쓴다. 소리 빠르기는 지침으로 조금 빠르게 부탁한다 |
 | `server/conversationHistory.js` | `load`, `save` | 대화 기록 저장 (`history.json`) |
