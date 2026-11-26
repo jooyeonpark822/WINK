@@ -91,12 +91,12 @@
 | 컨트롤러 -> 브릿지 | `DOWN`, `UP` | 버튼 누름, 뗌 |
 | 브릿지 -> 안경 | `ON`, `OFF` | 보내기 시작, 멈춤 |
 | 노트북 -> 서보 | `TALK`, `STOP`, `TEST`, `ANGLE n` | 말하는 동안 움직임, 멈춤, 왕복 시험, 각도 지정(0~180) |
-| 노트북 -> 안경 (서보) | `ANGLE1 n`, `ANGLE2 n` | 틸트(D0) 또는 팬(D1)만 n도(0~180)로. `STOP`, 부팅, `TEST` 끝의 영점은 틸트 0도, 팬 90도 |
+| 노트북 -> 안경 (서보) | `ANGLE1 n`, `ANGLE2 n` | 틸트(D0) 또는 팬(D1)만 n도(0~180)로. 틸트는 각도가 커질수록 **아래**로 내려가고 0도가 위쪽 끝이다. `STOP`, 부팅, `TEST` 끝의 영점은 틸트 **20도**(올려다보기가 끝까지 갈 수 있는 가장 작은 값), 팬 90도. 영점은 `firmware/glasses`의 `SERVO1_HOME`과 `server/server.js`의 `TILT_HOME`이 같아야 한다 |
 | 노트북 -> 안경 (스피커) | `BEEP` | 시험음 (880Hz, 0.4초) |
 | 노트북 -> 안경 (날개 톱니, 360도 연속 회전형 서보) | `WING n` (-100~100), `WING STOP`, `WING TRIM n` | 속도로 회전(0 = 정지), 정지, 정지 위치 보정(-200~200us) |
 | | `WING SWING`, `WING TURN n`, `WING SPEED n`, `WING CAL ms`, `WING ZERO`, `WING HOME`, `WING POS` | 각도로 움직이기. 이 모터는 각도 센서가 없어서 돌린 시간으로 추정한다. 영점에서 -90 <-> +90도 오가기, n도 돌기, 속도(10~100), 90도 도는 시간 보정, 지금 위치를 0도로, 추정 각도가 0이 되도록 돌아가기, 추정 각도 |
 
-안경은 위 서보 명령(`TALK`, `STOP`, `TEST`, `ANGLE n` 포함)과 `BEEP`을 USB 시리얼과 브릿지(데이터 포트) 양쪽으로 받는다. `ANGLE1`/`ANGLE2`는 서보 보드(`firmware/servo`)에도 있다.
+안경은 위 서보 명령(`TALK`, `STOP`, `TEST`, `ANGLE n` 포함)과 `BEEP`을 USB 시리얼과 브릿지(데이터 포트) 양쪽으로 받는다. `ANGLE1`/`ANGLE2`는 서보 보드(`firmware/servo`)에도 있다. 안경에서 `TALK`은 팬은 `cos`, 틸트는 `sin`으로 영점 기준 **동그라미**를 그린다(한 바퀴 3초, 팬 ±25도, 틸트 영점에서 아래로 0~45도, 시작 0.6초는 서서히). 날개 모터는 정지(`WING STOP`, `WING 0`, 영점 복귀 끝, 부팅)일 때 **PWM 신호를 끊는다**(연속 회전형 서보가 서서히 도는 것과 전원 잡음을 막으려고).
 
 **대답할 때 모터 움직이기:** 서버는 Gemini 대답 소리가 안경 스피커로 나가기 시작하면 안경에 `TALK`과 `WING SWING`을 보내고, 마지막 소리까지 재생이 끝나면(+0.3초) `STOP`과 `WING HOME`을 보낸다. 음성 대화와 글자 질문(`/ask`) 모두 같다. 명령은 `server/bridgeSerial.js`의 `sendCommand`로 보낸다. (줄 명령은 15글자 이하)
 
@@ -112,6 +112,7 @@
 | `/events` | GET | 실시간 이벤트(SSE) |
 | `/frame.jpg` | GET | 가장 최근 카메라 사진 |
 | `/ask` | POST | 글자로 질문(시험용) |
+| `/servo/test?action=nod\|shake\|lookup\|home\|wing-slow\|wing-fast\|wing-stop` | POST | 안경 모터 시험 버튼. 서버가 브릿지를 거쳐 안경에 `ANGLE1`/`ANGLE2`/`WING *` 명령을 보낸다. 브릿지가 없으면 409, 답하는 중이면 409, 알 수 없는 동작이면 400 |
 | `/history/clear` | POST | 대화 기록 지우기 |
 | `/collect/start?label=pos\|neg`, `/collect/stop` | POST | 호출어 녹음 모으기 |
 
@@ -131,7 +132,7 @@
 
 ### 4.7 웹 화면 id (`server/public/index.html`)
 
-`how`, `status`, `label`, `lamp`, `lamp-text`, `info`, `heard`, `answer`, `cam`, `sound`, `hist-count`, `hist-clear`, `history`, `collect-box`, `rec-pos`, `rec-neg`, `rec-info`, `form`, `q`, `ask`, `out`
+`how`, `status`, `label`, `lamp`, `lamp-text`, `info`, `heard`, `answer`, `cam`, `sound`, `hist-count`, `hist-clear`, `history`, `collect-box`, `rec-pos`, `rec-neg`, `rec-info`, `form`, `q`, `ask`, `out`, `servo-test`
 
 ### 4.8 환경 변수 (`server/.env`)
 
@@ -177,6 +178,4 @@ GitHub 이슈: https://github.com/jooyeonpark822/WINK/issues
 |---|---|---|
 | 새 파일 | `server/servoSerial.js` | #7 |
 | 환경 변수 | `SERVO_PORT` | #7 |
-| HTTP 경로 | `POST /servo/test` | #8 |
-| 웹 화면 id | `servo-test` | #9 |
 

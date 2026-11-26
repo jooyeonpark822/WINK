@@ -59,6 +59,86 @@ const session = createVoiceSession({
 // 시험용: server/.env 에 WINK_DUMP=파일이름.pcm 을 적으면 들어오는 마이크 소리를 그 파일에 저장한다. (16kHz 16비트 모노, 서버를 켤 때마다 새로 씀)
 const dumpFile = process.env.WINK_DUMP ? fs.createWriteStream(path.join(__dirname, process.env.WINK_DUMP)) : null;
 
+// ---- 모터 시험 버튼 (웹 화면 맨 아래) ----
+// 안경 보드의 모터(D0 틸트, D1 팬, D2 날개)를 브릿지로 명령을 보내 움직인다. (보드에 올린 안경 코드가 ANGLE1/ANGLE2/WING 명령을 받는다)
+// 팬·틸트 동작은 서버가 ANGLE1(틸트), ANGLE2(팬)를 초당 25번 이어서 보내 부드럽게 만든다.
+const PAN_HOME = 90;     // 팬 영점
+const TILT_HOME = 20;    // 틸트 영점. 각도가 커질수록 틸트는 아래로 내려가고(0도가 가장 위쪽 끝), 올려다보기(위로 LOOKUP_TILT도)가 딱 끝까지 가는 가장 작은 값이다. 끝에 닿아 서보가 힘을 쓰면 25로 올린다. 안경 코드의 SERVO1_HOME과 같아야 한다
+const PAN_RIGHT = 1;     // 팬이 오른쪽으로 갈 때 각도가 커지면 1, 작아지면 -1. (반대로 움직이면 이 값만 바꾼다)
+const NOD_DEG = 25;      // 끄덕끄덕 틸트 폭
+const SHAKE_DEG = 25;    // 절레절레 팬 폭
+const LOOKUP_PAN = 30;   // 올려다보기: 영점에서 팬 오른쪽으로
+const LOOKUP_TILT = 20;  // 올려다보기: 영점에서 틸트 위로 (각도가 작아지는 쪽)
+const WING_SLOW = 30;    // 날개 느리게 (WING SPEED)
+const WING_FAST = 80;    // 날개 빠르게
+const MOTION_HZ = 25;
+let pose = { pan: PAN_HOME, tilt: TILT_HOME };  // 서버가 마지막으로 보낸 팬·틸트 자세
+let motionTimer = null;
+
+function setPose(pan, tilt, force = false) {
+  const p = Math.round(Math.min(180, Math.max(0, pan)));
+  const t = Math.round(Math.min(180, Math.max(0, tilt)));
+  if (force || p !== pose.pan) bridge.sendCommand(`ANGLE2 ${p}`);
+  if (force || t !== pose.tilt) bridge.sendCommand(`ANGLE1 ${t}`);
+  pose = { pan: p, tilt: t };
+}
+function stopMotion() { if (motionTimer) { clearInterval(motionTimer); motionTimer = null; } }
+// durationMs 동안 fn(경과 ms)가 돌려주는 {pan, tilt}로 움직이고, 끝나면 onDone을 부른다. 새 동작을 시작하면 하던 동작은 멈춘다.
+function animate(durationMs, fn, onDone) {
+  stopMotion();
+  const start = Date.now();
+  let first = true;
+  motionTimer = setInterval(() => {
+    const t = Date.now() - start;
+    if (t >= durationMs) { stopMotion(); if (onDone) onDone(); return; }
+    const p = fn(t);
+    setPose(p.pan, p.tilt, first);  // 첫 걸음은 두 서보 모두 보낸다 (서버가 아는 자세와 실제가 어긋났을 수 있어서)
+    first = false;
+  }, 1000 / MOTION_HZ);
+}
+// 지금 자세에서 목표 자세로 ms 동안 부드럽게 이동
+function moveTo(pan, tilt, ms, onDone) {
+  const from = { ...pose };
+  animate(ms, (t) => {
+    const k = 0.5 - 0.5 * Math.cos(Math.PI * t / ms);
+    return { pan: from.pan + (pan - from.pan) * k, tilt: from.tilt + (tilt - from.tilt) * k };
+  }, () => { setPose(pan, tilt, true); if (onDone) onDone(); });
+}
+const atHome = () => pose.pan === PAN_HOME && pose.tilt === TILT_HOME;
+// 영점이 아니면 영점으로 먼저 간 뒤 동작을 시작한다 (자세가 갑자기 튀지 않게)
+const fromHome = (run) => (atHome() ? run() : moveTo(PAN_HOME, TILT_HOME, 500, run));
+
+// action: nod | shake | lookup | home | wing-slow | wing-fast | wing-stop. 알 수 없는 동작이면 false
+function runMotor(action) {
+  switch (action) {
+    case 'nod': // 끄덕끄덕: 틸트만 영점에서 아래로 NOD_DEG까지 3번 (한 번에 0.8초)
+      fromHome(() => animate(2400, (t) => ({ pan: PAN_HOME, tilt: TILT_HOME + NOD_DEG * (0.5 - 0.5 * Math.cos(2 * Math.PI * t / 800)) }),
+        () => setPose(PAN_HOME, TILT_HOME, true)));
+      return true;
+    case 'shake': // 절레절레: 팬만 좌우로 3번 (한 번에 0.9초)
+      fromHome(() => animate(2700, (t) => ({ pan: PAN_HOME + SHAKE_DEG * Math.sin(2 * Math.PI * t / 900), tilt: TILT_HOME }),
+        () => setPose(PAN_HOME, TILT_HOME, true)));
+      return true;
+    case 'lookup': // 올려다보기: 영점에서 팬 오른쪽 LOOKUP_PAN도, 틸트 위로 LOOKUP_TILT도(각도는 작아진다). 자세를 유지한다 (원점 버튼으로 돌아온다)
+      moveTo(PAN_HOME + PAN_RIGHT * LOOKUP_PAN, TILT_HOME - LOOKUP_TILT, 700);
+      return true;
+    case 'home': // 원점: 팬·틸트를 영점으로
+      moveTo(PAN_HOME, TILT_HOME, 700);
+      return true;
+    case 'wing-slow':
+      bridge.sendCommand(`WING SPEED ${WING_SLOW}`); bridge.sendCommand('WING SWING');
+      return true;
+    case 'wing-fast':
+      bridge.sendCommand(`WING SPEED ${WING_FAST}`); bridge.sendCommand('WING SWING');
+      return true;
+    case 'wing-stop': // 정지: 날개를 영점으로 돌려놓고 멈춘다
+      bridge.sendCommand('WING HOME');
+      return true;
+    default:
+      return false;
+  }
+}
+
 // 호출어 보정용 녹음 모으기 (웹 화면의 "호출어 보정 데이터 모으기")
 const collector = createCollector({ onChange: (s) => emit('collect', s) });
 
@@ -75,8 +155,9 @@ bridge = startBridgeSerial({
   onSpeaking: (on) => {
     if (!bridge) return;
     console.log(on ? '대답 소리가 안경 스피커로 나가기 시작 -> 모터 시작 (TALK, WING SWING)' : '대답 소리 재생이 끝남 -> 모터 정지 (STOP, WING HOME)');
+    stopMotion();  // 시험 버튼으로 움직이던 동작은 멈춘다
     if (on) { bridge.sendCommand('TALK'); bridge.sendCommand('WING SWING'); }  // 팬·틸트 흔들기 + 날개 오가기
-    else { bridge.sendCommand('STOP'); bridge.sendCommand('WING HOME'); }      // 팬·틸트 영점 + 날개 영점으로
+    else { bridge.sendCommand('STOP'); bridge.sendCommand('WING HOME'); pose = { pan: PAN_HOME, tilt: TILT_HOME }; }      // 팬·틸트 영점 + 날개 영점으로
   },
 });
 
@@ -99,6 +180,18 @@ const server = http.createServer((req, res) => {
     viewers.add(res);
     req.on('close', () => viewers.delete(res));
     return;
+  }
+
+  // 모터 시험 버튼: POST /servo/test?action=nod|shake|lookup|home|wing-slow|wing-fast|wing-stop
+  if (url === '/servo/test' && req.method === 'POST') {
+    const action = new URL(req.url, 'http://x').searchParams.get('action');
+    let status = 200;
+    let error;
+    if (!bridgeStatus.serial) { status = 409; error = '브릿지 보드가 연결되지 않았습니다.'; }
+    else if (session.getState() === 'answering') { status = 409; error = 'WINK가 답하는 중이에요. 답이 끝난 뒤에 눌러 주세요.'; }
+    else if (!runMotor(action)) { status = 400; error = `알 수 없는 동작입니다: ${action}`; }
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify(error ? { ok: false, error } : { ok: true, action }));
   }
 
   // 호출어 보정 녹음: /collect/start?label=pos|neg , /collect/stop

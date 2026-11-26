@@ -49,6 +49,11 @@
   .msg .t { display: block; font-size: 11px; color: #888; margin-top: 2px; }
   form { display: flex; gap: 8px; margin-top: 8px; }
   input[type=text] { flex: 1; font-size: 16px; padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
+  #servo-test { margin-top: 28px; padding: 14px; border: 1px solid #ccc; border-radius: 8px; }
+  #servo-test h2 { margin: 0 0 4px; font-size: 16px; }
+  #servo-test h3 { margin: 14px 0 6px; font-size: 14px; color: #555; }
+  #servo-test .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  #servo-test .hint { font-size: 12px; color: #888; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -95,6 +100,30 @@
     </form>
     <div class="box" id="out">응답이 여기에 나옵니다.</div>
   </details>
+
+  <div id="servo-test">
+    <h2>모터 움직여 보기 (시험용)</h2>
+    <div class="small">안경 보드의 모터를 버튼으로 움직여 봐요. WINK가 답하는 중에는 눌러도 움직이지 않아요.</div>
+
+    <h3>D0, D1 (머리)</h3>
+    <div class="btns">
+      <button type="button" data-action="nod">끄덕끄덕</button>
+      <button type="button" data-action="shake">절레절레</button>
+      <button type="button" data-action="lookup">올려다보기</button>
+      <button type="button" data-action="home">원점</button>
+    </div>
+    <div class="hint">올려다보기: 원점에서 팬 오른쪽으로 30도, 틸트 위로 20도. 원점 버튼으로 돌아와요.</div>
+
+    <h3>D2 (날개)</h3>
+    <div class="btns">
+      <button type="button" data-action="wing-slow">느리게</button>
+      <button type="button" data-action="wing-fast">빠르게</button>
+      <button type="button" data-action="wing-stop">정지</button>
+    </div>
+    <div class="hint">영점에서 -90도 ↔ +90도로 계속 오가요. 정지를 누르면 영점으로 돌아와 멈춰요.</div>
+
+    <div class="small" style="margin-top:10px">버튼을 누르면 여기에 결과가 나와요.</div>
+  </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -264,6 +293,24 @@ $('form').onsubmit = async (ev) => {
     $('ask').disabled = false;
   }
 };
+
+// ---- 모터 움직여 보기 (시험용) ----
+document.querySelectorAll('#servo-test button[data-action]').forEach((b) => {
+  b.onclick = async () => {
+    const info = document.querySelector('#servo-test > .small:last-child');
+    info.className = 'small';
+    info.textContent = '보내는 중...';
+    try {
+      const r = await fetch('/servo/test?action=' + encodeURIComponent(b.dataset.action), { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || r.statusText);
+      info.textContent = '보냈어요: ' + b.textContent.trim();
+    } catch (e) {
+      info.className = 'small err';
+      info.textContent = '오류: ' + e.message;
+    }
+  };
+});
 </script>
 </body>
 </html>
