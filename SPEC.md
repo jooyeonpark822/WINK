@@ -54,7 +54,7 @@
 | 보드 | 폴더 | 하는 일 | 핀 |
 |---|---|---|---|
 | 브릿지 | `firmware/bridge` | Soft AP(`AP_SSID`)를 열고 TCP 두 포트를 받는다. 안경이 보낸 것을 USB 시리얼로 전달하고, 노트북이 보낸 것은 안경에 전달한다. 컨트롤러가 끊기면 안경에 `OFF`를 대신 보낸다. | - |
-| 안경 | `firmware/glasses` | 카메라 JPEG와 마이크 소리를 프레임으로 만들어 브릿지 데이터 포트로 보낸다. `ON`/`OFF`를 받으면 보내기를 켜고 끈다. | 카메라 핀은 Sense 보드 기본값(`CAM_PIN_*`) |
+| 안경 | `firmware/glasses` | 카메라 JPEG와 마이크 소리를 프레임으로 만들어 브릿지 데이터 포트로 보낸다. 노트북이 보낸 스피커 소리 프레임(종류 4)을 받아 스피커로 낸다. 서보 3개(틸트, 팬, 날개 톱니)를 움직인다. 명령은 USB 시리얼이나 브릿지로 받는다. | 카메라 핀은 Sense 보드 기본값(`CAM_PIN_*`). 서보: 틸트 `D0`, 팬 `D1`, 날개 톱니 `D2`. 스피커 앰프(MAX98357A): `BCLK` = `D3`, `LRC` = `D4`, `DIN` = `D5` |
 | 컨트롤러 | `firmware/controller` | 버튼을 누르면 `DOWN\n`, 떼면 `UP\n`을 브릿지 제어 포트로 보낸다. | 버튼 `D4` (누르면 LOW, 내부 풀업) |
 | 서보 | `firmware/servo` | USB 시리얼(115200) 명령으로 움직인다. | 신호선 `D0` |
 
@@ -70,7 +70,7 @@
 | `CONTROL_PORT` | 8081 | 브릿지가 열고 컨트롤러가 접속 | 컨트롤러 버튼 신호 |
 | 서버 `PORT` | 3000 | 노트북 서버 | 웹 화면과 API |
 
-### 4.2 안경 -> 노트북 프레임 (시리얼)
+### 4.2 프레임 (시리얼)
 
 `[AA 55 A5 5A] [종류 1바이트] [길이 4바이트, little-endian] [데이터]`
 
@@ -79,8 +79,10 @@
 | 1 | 카메라 사진 | JPEG 한 장 |
 | 2 | 마이크 소리 | PCM 조각 (16kHz, 16비트, 모노) |
 | 3 | 컨트롤러 버튼 | 1바이트 (1 = 누름, 0 = 뗌) |
+| 4 | 안경 스피커 소리 | PCM 조각 (24kHz, 16비트, 모노). 방향이 반대다: 노트북 -> 브릿지 -> 안경 |
 
-만든 쪽: `firmware/glasses`의 `writeHeader`. 읽는 쪽: `server/bridgeSerial.js`의 `startBridgeSerial`.
+종류 1~3 (안경 -> 노트북): 만든 쪽 `firmware/glasses`의 `writeHeader`, 읽는 쪽 `server/bridgeSerial.js`의 `startBridgeSerial`.
+종류 4 (노트북 -> 안경): 만든 쪽 `server/bridgeSerial.js`의 `sendAudio`(20ms = 960바이트 조각으로 재생 속도에 맞춰 보낸다), 읽는 쪽 `firmware/glasses`의 `pumpIncoming`. 브릿지 보드는 노트북이 보낸 바이트를 그대로 안경에 전달한다.
 
 ### 4.3 한 줄 명령
 
@@ -89,6 +91,12 @@
 | 컨트롤러 -> 브릿지 | `DOWN`, `UP` | 버튼 누름, 뗌 |
 | 브릿지 -> 안경 | `ON`, `OFF` | 보내기 시작, 멈춤 |
 | 노트북 -> 서보 | `TALK`, `STOP`, `TEST`, `ANGLE n` | 말하는 동안 움직임, 멈춤, 왕복 시험, 각도 지정(0~180) |
+| 노트북 -> 안경 (서보) | `ANGLE1 n`, `ANGLE2 n` | 틸트(D0) 또는 팬(D1)만 n도(0~180)로. `STOP`, 부팅, `TEST` 끝의 영점은 틸트 0도, 팬 90도 |
+| 노트북 -> 안경 (스피커) | `BEEP` | 시험음 (880Hz, 0.4초) |
+| 노트북 -> 안경 (날개 톱니, 360도 연속 회전형 서보) | `WING n` (-100~100), `WING STOP`, `WING TRIM n` | 속도로 회전(0 = 정지), 정지, 정지 위치 보정(-200~200us) |
+| | `WING SWING`, `WING TURN n`, `WING SPEED n`, `WING CAL ms`, `WING ZERO`, `WING POS` | 각도로 움직이기. 이 모터는 각도 센서가 없어서 돌린 시간으로 추정한다. 영점에서 -90 <-> +90도 오가기, n도 돌기, 속도(10~100), 90도 도는 시간 보정, 지금 위치를 0도로, 추정 각도 |
+
+안경은 위 서보 명령(`TALK`, `STOP`, `TEST`, `ANGLE n` 포함)과 `BEEP`을 USB 시리얼과 브릿지(데이터 포트) 양쪽으로 받는다. `ANGLE1`/`ANGLE2`는 서보 보드(`firmware/servo`)에도 있다.
 
 ### 4.4 서버 -> 웹 화면 (`GET /events`, SSE)
 
@@ -110,7 +118,7 @@
 | 파일 | 이름 | 하는 일 |
 |---|---|---|
 | `server/server.js` | `emit` | 웹 화면으로 이벤트 보내기 |
-| `server/bridgeSerial.js` | `startBridgeSerial` | 브릿지 시리얼에서 프레임 읽기 (`serialReader.py` 사용) |
+| `server/bridgeSerial.js` | `startBridgeSerial`, `sendAudio` | 브릿지 시리얼에서 프레임 읽기 (`serialReader.py` 사용). `sendAudio`는 Gemini 대답 소리를 안경 스피커로 보내기 |
 | `server/voiceSession.js` | `createVoiceSession` | 듣기(idle -> listening -> thinking) 상태 관리 |
 | `server/geminiLive.js` | `askGemini`, `startLiveTurn`, `buildSystemText`, `SYSTEM_INSTRUCTION` | Gemini Live 호출과 말투 지침 |
 | `server/coaching.js` | `onAudio`, `buildCoachingText` | 말소리/침묵 측정과 코칭 규칙 |
@@ -169,6 +177,4 @@ GitHub 이슈: https://github.com/jooyeonpark822/WINK/issues
 | 환경 변수 | `SERVO_PORT` | #7 |
 | HTTP 경로 | `POST /servo/test` | #8 |
 | 웹 화면 id | `servo-test` | #9 |
-| 소리 프레임 종류 | `4` (노트북 -> 안경, 24kHz 16비트 모노) | #13 |
-| 안경 스피커 핀 | 미정 | #11 |
 

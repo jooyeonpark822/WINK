@@ -23,7 +23,9 @@ constexpr uint8_t FRAME_MAGIC[4] = {0xAA, 0x55, 0xA5, 0x5A};
 constexpr uint8_t TYPE_VIDEO = 1;  // JPEG 한 장
 constexpr uint8_t TYPE_AUDIO = 2;  // 16비트 PCM 조각 (모노, little-endian)
 constexpr uint8_t TYPE_BUTTON = 3; // 컨트롤러 버튼 눌림 (데이터 1바이트)
+constexpr uint8_t TYPE_SPEAKER = 4; // 노트북 -> 안경 스피커 소리 (16비트 PCM, 24kHz, 모노). 브릿지가 그대로 전달해 준다.
 constexpr size_t HEADER_SIZE = 9;
+constexpr uint32_t MAX_RX_PAYLOAD = 8192;  // 노트북이 보내는 프레임은 작다. 이보다 크면 잘못 읽은 것으로 보고 버린다
 
 // 마이크 (XIAO ESP32S3 Sense 내장 PDM 마이크)
 constexpr int MIC_CLK_PIN = 42;
@@ -40,6 +42,7 @@ constexpr uint32_t BLINK_HALF_PERIOD_MS = 250;
 // 서보모터 2개 (신호선만 보드에 연결. 전원은 5V 핀, GND는 공통)
 // 카메라가 PWM 타이머 0 / 채널 0을 쓰므로, 서보는 타이머 2 / 채널 2, 3을 직접 지정해서 서로 부딪히지 않게 한다.
 // 명령(한 줄, 줄 끝 \n)은 USB 시리얼이나 브릿지로 받는다: TALK, STOP, TEST, ANGLE n, ANGLE1 n, ANGLE2 n
+// 영점(STOP, 부팅, TEST가 끝났을 때): 틸트(D0, ANGLE1) = 0도, 팬(D1, ANGLE2) = 90도
 constexpr int SERVO1_PIN = D0;
 constexpr int SERVO2_PIN = D1;
 constexpr ledc_timer_t SERVO_TIMER = LEDC_TIMER_2;
@@ -47,11 +50,39 @@ constexpr ledc_channel_t SERVO1_CHANNEL = LEDC_CHANNEL_2;
 constexpr ledc_channel_t SERVO2_CHANNEL = LEDC_CHANNEL_3;
 constexpr int SERVO_MIN_US = 500;
 constexpr int SERVO_MAX_US = 2400;
-constexpr int SERVO_CENTER = 90;
-constexpr int SERVO_SWING = 25;                  // 말할 때 가운데에서 좌우로 흔들리는 폭
+constexpr int SERVO_CENTER = 90;                 // 팬(D1)의 영점(쉬는 자리)
+constexpr int SERVO1_HOME = 0;                   // 틸트(D0)의 영점. 90도에서 반시계로 90도 돌린 위치이며 서보의 한쪽 끝이라 이 자리에서는 각도가 커지는 쪽으로만 움직인다.
+constexpr int SERVO_SWING = 25;                  // 말할 때 영점에서 움직이는 폭 (팬은 좌우로, 틸트는 영점에서 한쪽으로)
 constexpr uint32_t SERVO_SWING_PERIOD_MS = 600;  // 한 번 왕복하는 시간
 constexpr uint32_t SERVO_UPDATE_MS = 15;
 constexpr uint32_t SERVO_TEST_STEP_MS = 700;
+
+// 날개 톱니 모터 (D2, 360도 연속 회전형 서보). 각도가 아니라 속도와 방향으로 제어한다.
+// 펄스 폭이 정지 값(WING_NEUTRAL_US)이면 멈추고, 작으면 한 방향, 크면 반대 방향으로 돈다. 정지 값은 모터마다 조금 달라서 WING TRIM으로 맞춘다.
+// 명령: WING n (n = -100~100, 0이면 정지), WING STOP, WING TRIM n (정지 값을 n마이크로초 옮김, -200~200)
+constexpr int WING_PIN = D2;
+constexpr ledc_channel_t WING_CHANNEL = LEDC_CHANNEL_4;
+constexpr int WING_NEUTRAL_US = 1500;  // 정지 펄스 폭 (기본값. 서서히 도는 모터는 WING TRIM으로 맞춘다)
+constexpr int WING_SPAN_US = 400;      // 속도 100일 때 정지 값에서 벗어나는 펄스 폭 (1100 ~ 1900us)
+
+// 날개 모터를 "각도"로 움직이기: 이 모터에는 각도 센서가 없어서 돌린 시간으로 각도를 추정한다. (오래 돌리면 오차가 쌓이니 WING ZERO로 다시 맞춘다)
+// 명령: WING SWING (영점에서 -90 <-> +90도를 계속 오감), WING TURN n (n도 돌고 멈춤), WING SPEED n (각도로 움직일 때 속도 10~100, 90도 시간은 속도에 반비례로 환산),
+//       WING CAL ms (지금 속도에서 90도 도는 시간), WING ZERO (지금 위치를 0도로), WING POS (추정 각도 출력)
+// 양수 방향 = WING 양수 속도로 도는 방향이다.
+constexpr int WING_ANGLE_SPEED = 50;          // 각도로 움직일 때 쓰는 기본 속도 (WING n의 n과 같은 크기). WING SPEED n으로 바꿀 수 있다
+constexpr int WING_SWING_RANGE = 90;          // 영점에서 좌우로 오가는 각도
+constexpr uint32_t WING_SWING_PAUSE_MS = 200; // 방향을 바꾸기 전에 잠깐 쉰다 (관성 때문에 더 돌지 않게)
+constexpr uint32_t WING_DEFAULT_MS_PER_90 = 480;  // 기본 속도(50)에서 90도 도는 데 걸리는 시간의 처음 추정값. (속도 30에서 800ms로 맞춘 값을 속도 비율로 환산) WING CAL로 맞춘다
+
+// 스피커 앰프 MAX98357A (I2S 출력). 앰프 SD-GAIN 핀은 비워 둔다.
+// 마이크 I2S와 별개로 쓰는 출력이라 마이크 초기화 뒤에 만든다. 앰프는 좌우를 섞어 내보내서 양쪽에 같은 소리를 보낸다.
+constexpr int SPK_BCLK_PIN = D3;
+constexpr int SPK_LRC_PIN = D4;
+constexpr int SPK_DIN_PIN = D5;
+constexpr uint32_t SPK_SAMPLE_RATE = 24000;  // Gemini 대답 소리가 24kHz 16비트 모노라서 같은 값을 쓴다
+constexpr float SPK_VOLUME = 0.25f;          // 0~1. 처음엔 낮게. 크게 하면 전류가 솟아 보드가 끊길 수 있다
+constexpr size_t SPK_BUFFER_BYTES = 65536;   // 받은 소리를 쌓아 두는 곳 (약 1.4초). 서버가 재생 속도에 맞춰 보내서 보통 조금만 찬다
+constexpr size_t SPK_CHUNK_SAMPLES = 480;    // 한 번에 스피커로 내보내는 양 (20ms)
 
 // XIAO ESP32S3 Sense 카메라 핀
 constexpr int CAM_PIN_PWDN = -1;
@@ -83,7 +114,12 @@ char controlLine[16];
 size_t controlLen = 0;
 WiFiClient bridge;
 I2SClass i2s;
+I2SClass i2sOut;  // 스피커 출력용
+bool speakerReady = false;
 StreamBufferHandle_t audioBuffer;
+StreamBufferHandle_t spkBuffer;  // 스피커로 낼 소리 (모노 16비트)
+volatile uint32_t statSpkBytes = 0;     // 스피커 버퍼에 받은 바이트
+volatile uint32_t statSpkDropped = 0;   // 버퍼가 가득 차서 버린 바이트
 
 // 진단용 통계 (10초마다 USB 시리얼에 출력. 브릿지로 가는 데이터에는 섞이지 않는다)
 constexpr uint32_t STATS_INTERVAL_MS = 10000;
@@ -115,17 +151,84 @@ bool servoTalking = false;
 int servoTestStep = -1;  // -1이면 TEST 중이 아님
 uint32_t servoTestStepMs = 0;
 
-void servoWrite(ledc_channel_t channel, int angle) {
-  angle = constrain(angle, 0, 180);
-  uint32_t pulseUs = SERVO_MIN_US + (uint32_t)angle * (SERVO_MAX_US - SERVO_MIN_US) / 180;
+int wingNeutralUs = WING_NEUTRAL_US;  // WING TRIM으로 바뀔 수 있는 현재 정지 값
+int wingSpeed = 0;
+
+void servoWritePulse(ledc_channel_t channel, uint32_t pulseUs) {
   uint32_t duty = pulseUs * 16384UL / 20000UL;  // 14비트, 50Hz(20ms)
   ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, duty);
   ledc_update_duty(LEDC_LOW_SPEED_MODE, channel);
 }
 
+void servoWrite(ledc_channel_t channel, int angle) {
+  angle = constrain(angle, 0, 180);
+  servoWritePulse(channel, SERVO_MIN_US + (uint32_t)angle * (SERVO_MAX_US - SERVO_MIN_US) / 180);
+}
+
+// 날개 모터: speed -100~100 (0 = 정지)
+void wingSet(int speed) {
+  wingSpeed = constrain(speed, -100, 100);
+  servoWritePulse(WING_CHANNEL, wingNeutralUs + wingSpeed * WING_SPAN_US / 100);
+}
+
+// ---- 날개 모터를 각도로 움직이기 (시간으로 추정) ----
+uint32_t wingMsPer90 = WING_DEFAULT_MS_PER_90;
+int wingAngleSpeed = WING_ANGLE_SPEED;  // 지금 각도로 움직일 때 쓰는 속도
+float wingPosDeg = 0;          // 영점에서 얼마나 돌았다고 추정하는 각도 (양수 방향이 +)
+bool wingTurning = false;      // 지금 정해진 각도만큼 도는 중
+int wingTurnDir = 0;           // +1 / -1
+int wingTurnDeg = 0;           // 이번에 돌 각도(양수)
+uint32_t wingTurnStartMs = 0;
+uint32_t wingTurnEndMs = 0;
+bool wingSwinging = false;     // -90 <-> +90 오가기 중
+int wingSwingNext = -WING_SWING_RANGE;  // 다음 목표 각도
+uint32_t wingPauseUntilMs = 0;
+
+void wingStartTurn(int deg) {
+  if (deg == 0) return;
+  wingTurnDir = deg > 0 ? 1 : -1;
+  wingTurnDeg = abs(deg);
+  wingTurnStartMs = millis();
+  wingTurnEndMs = wingTurnStartMs + (uint32_t)((float)wingTurnDeg * wingMsPer90 / 90.0f);
+  wingTurning = true;
+  wingSet(wingTurnDir * wingAngleSpeed);
+}
+
+// 도는 중이면 지금까지 돈 만큼을 추정 각도에 반영하고 멈춘다. 오가기도 끈다.
+void wingAbort() {
+  if (wingTurning) {
+    uint32_t total = wingTurnEndMs - wingTurnStartMs;
+    float frac = total ? (float)(millis() - wingTurnStartMs) / (float)total : 1.0f;
+    wingPosDeg += wingTurnDir * wingTurnDeg * constrain(frac, 0.0f, 1.0f);
+    wingTurning = false;
+  }
+  wingSwinging = false;
+  wingSet(0);
+}
+
+void updateWing() {
+  uint32_t now = millis();
+  if (wingTurning && (int32_t)(now - wingTurnEndMs) >= 0) {
+    wingPosDeg += wingTurnDir * wingTurnDeg;
+    wingTurning = false;
+    wingSet(0);
+    wingPauseUntilMs = now + WING_SWING_PAUSE_MS;
+  }
+  if (wingSwinging && !wingTurning && (int32_t)(now - wingPauseUntilMs) >= 0) {
+    wingStartTurn(wingSwingNext - (int)lroundf(wingPosDeg));
+    wingSwingNext = -wingSwingNext;
+  }
+}
+
 void servoMoveBoth(int angle) {
   servoWrite(SERVO1_CHANNEL, angle);
   servoWrite(SERVO2_CHANNEL, angle);
+}
+
+// 두 서보를 각자의 영점으로 보낸다. 틸트(D0)는 SERVO1_HOME, 팬(D1)은 SERVO_CENTER.
+void servoHome() {
+  servoWrite(SERVO1_CHANNEL, SERVO1_HOME);
+  servoWrite(SERVO2_CHANNEL, SERVO_CENTER);
 }
 
 void initServos() {
@@ -149,8 +252,78 @@ void initServos() {
     ch.hpoint = 0;
     ledc_channel_config(&ch);
   }
-  servoMoveBoth(SERVO_CENTER);
-  Serial.println("Servo OK (D0, D1)");
+  servoHome();
+
+  ledc_channel_config_t wing = {};  // 날개 모터(D2)는 같은 타이머 2를 쓰고 채널 4를 쓴다
+  wing.gpio_num = WING_PIN;
+  wing.speed_mode = LEDC_LOW_SPEED_MODE;
+  wing.channel = WING_CHANNEL;
+  wing.timer_sel = SERVO_TIMER;
+  wing.duty = 0;
+  wing.hpoint = 0;
+  ledc_channel_config(&wing);
+  wingSet(0);
+  Serial.println("Servo OK (D0, D1, wing D2)");
+}
+
+// ---- 스피커 ----
+// 소리를 스피커로 내는 곳은 이 태스크 하나뿐이다. (BEEP도, 노트북이 보낸 소리 프레임도 spkBuffer에 넣으면 여기서 나온다)
+// 버퍼가 비면 무음을 계속 내보내서 스피커에서 지지직 소리가 나지 않게 한다.
+void speakerTask(void*) {
+  static int16_t in[SPK_CHUNK_SAMPLES];
+  static int16_t out[SPK_CHUNK_SAMPLES * 2];  // 왼쪽/오른쪽 같은 값
+  uint8_t carry = 0;                          // 16비트가 2바이트씩 안 맞게 들어온 경우 남는 1바이트
+  bool hasCarry = false;
+  for (;;) {
+    uint8_t* dst = (uint8_t*)in;
+    size_t offset = 0;
+    if (hasCarry) { dst[0] = carry; offset = 1; hasCarry = false; }
+    size_t n = xStreamBufferReceive(spkBuffer, dst + offset, sizeof(in) - offset, pdMS_TO_TICKS(20)) + offset;
+    if (n & 1) { carry = dst[n - 1]; hasCarry = true; n--; }
+    size_t samples = n / 2;
+    if (samples == 0) {
+      memset(out, 0, sizeof(out));
+      i2sOut.write((uint8_t*)out, sizeof(out));  // 20ms 무음
+      continue;
+    }
+    for (size_t i = 0; i < samples; i++) {
+      int16_t v = (int16_t)(in[i] * SPK_VOLUME);
+      out[i * 2] = v;
+      out[i * 2 + 1] = v;
+    }
+    i2sOut.write((uint8_t*)out, samples * 4);
+  }
+}
+
+bool initSpeaker() {
+  spkBuffer = xStreamBufferCreate(SPK_BUFFER_BYTES, 1);
+  if (!spkBuffer) {
+    Serial.println("Speaker buffer failed");
+    return false;
+  }
+  i2sOut.setPins(SPK_BCLK_PIN, SPK_LRC_PIN, SPK_DIN_PIN);
+  if (!i2sOut.begin(I2S_MODE_STD, SPK_SAMPLE_RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO)) {
+    Serial.println("Speaker init failed");
+    return false;
+  }
+  xTaskCreatePinnedToCore(speakerTask, "speaker", 4096, nullptr, 2, nullptr, 0);
+  Serial.printf("Speaker OK (BCLK=%d LRC=%d DIN=%d, %luHz)\n", SPK_BCLK_PIN, SPK_LRC_PIN, SPK_DIN_PIN, (unsigned long)SPK_SAMPLE_RATE);
+  return true;
+}
+
+// 시험음: 880Hz를 0.4초. 시작과 끝을 부드럽게 올리고 내려서 "딱" 소리가 나지 않게 한다.
+// 음량은 speakerTask가 SPK_VOLUME으로 줄이므로 여기서는 최대 크기로 만든다.
+void playBeep() {
+  const uint32_t total = SPK_SAMPLE_RATE * 4 / 10;
+  const uint32_t ramp = SPK_SAMPLE_RATE / 50;  // 20ms
+  static int16_t buf[SPK_SAMPLE_RATE * 4 / 10];
+  for (uint32_t k = 0; k < total; k++) {
+    float env = 1.0f;
+    if (k < ramp) env = (float)k / ramp;
+    else if (k > total - ramp) env = (float)(total - k) / ramp;
+    buf[k] = (int16_t)(sinf(TWO_PI * 880.0f * k / SPK_SAMPLE_RATE) * 32767.0f * env);
+  }
+  xStreamBufferSend(spkBuffer, buf, sizeof(buf), pdMS_TO_TICKS(100));
 }
 
 // 명령 한 줄을 처리한다. 서보 명령이면 true.
@@ -167,7 +340,7 @@ bool handleServoCommand(const char* line) {
   } else if (strcmp(cmd, "STOP") == 0) {
     servoTalking = false;
     servoTestStep = -1;
-    servoMoveBoth(SERVO_CENTER);
+    servoHome();
     Serial.println("OK STOP");
   } else if (strcmp(cmd, "TEST") == 0) {
     servoTalking = false;
@@ -186,6 +359,50 @@ bool handleServoCommand(const char* line) {
     int angle = constrain(atoi(cmd + 6), 0, 180);
     servoMoveBoth(angle);
     Serial.printf("OK ANGLE %d\n", angle);
+  } else if (strcmp(cmd, "WING STOP") == 0) {
+    wingAbort();
+    Serial.println("OK WING STOP");
+  } else if (strcmp(cmd, "WING SWING") == 0) {
+    wingAbort();
+    wingSwinging = true;
+    wingSwingNext = -WING_SWING_RANGE;  // 처음에는 -90도 쪽으로
+    wingPauseUntilMs = 0;
+    Serial.printf("OK WING SWING (-%d <-> +%d도, 90도당 %lums)\n", WING_SWING_RANGE, WING_SWING_RANGE, (unsigned long)wingMsPer90);
+  } else if (strncmp(cmd, "WING TURN ", 10) == 0) {
+    wingAbort();
+    int deg = atoi(cmd + 10);
+    wingStartTurn(deg);
+    Serial.printf("OK WING TURN %d\n", deg);
+  } else if (strncmp(cmd, "WING SPEED ", 11) == 0) {
+    wingAbort();
+    int sp = constrain(atoi(cmd + 11), 10, 100);
+    wingMsPer90 = constrain((uint32_t)((uint64_t)wingMsPer90 * wingAngleSpeed / sp), 50, 5000);  // 속도에 반비례로 환산
+    wingAngleSpeed = sp;
+    Serial.printf("OK WING SPEED %d (90도당 %lums)\n", wingAngleSpeed, (unsigned long)wingMsPer90);
+  } else if (strncmp(cmd, "WING CAL ", 9) == 0) {
+    wingMsPer90 = constrain(atoi(cmd + 9), 50, 5000);
+    Serial.printf("OK WING CAL %lums/90도\n", (unsigned long)wingMsPer90);
+  } else if (strcmp(cmd, "WING ZERO") == 0) {
+    wingAbort();
+    wingPosDeg = 0;
+    Serial.println("OK WING ZERO");
+  } else if (strcmp(cmd, "WING POS") == 0) {
+    Serial.printf("OK WING POS %d도\n", (int)lroundf(wingPosDeg));
+  } else if (strncmp(cmd, "WING TRIM ", 10) == 0) {
+    wingNeutralUs = constrain(wingNeutralUs + atoi(cmd + 10), WING_NEUTRAL_US - 200, WING_NEUTRAL_US + 200);
+    wingSet(wingSpeed);
+    Serial.printf("OK WING TRIM neutral=%dus\n", wingNeutralUs);
+  } else if (strncmp(cmd, "WING ", 5) == 0) {
+    wingAbort();  // 속도로 직접 돌릴 때는 각도로 움직이는 동작을 끈다
+    wingSet(atoi(cmd + 5));
+    Serial.printf("OK WING %d\n", wingSpeed);
+  } else if (strcmp(cmd, "BEEP") == 0) {
+    if (speakerReady) {
+      playBeep();
+      Serial.println("OK BEEP");
+    } else {
+      Serial.println("ERR SPEAKER");
+    }
   } else {
     return false;
   }
@@ -211,12 +428,14 @@ void readServoSerial() {
 // 멈추지 않고(delay 없이) 서보를 움직인다. 소리와 사진 전송이 끊기지 않게 loop마다 조금씩만 처리한다.
 void updateServos() {
   uint32_t now = millis();
+  updateWing();
 
   if (servoTestStep >= 0) {  // TEST: 0 -> 90 -> 180 -> 90도
     const int steps[] = {0, 90, 180, 90};
     if (servoTestStepMs == 0 || now - servoTestStepMs >= SERVO_TEST_STEP_MS) {
       if (servoTestStep >= 4) {
         servoTestStep = -1;
+        servoHome();  // 시험이 끝나면 영점으로
       } else {
         servoMoveBoth(steps[servoTestStep++]);
         servoTestStepMs = now ? now : 1;
@@ -230,7 +449,9 @@ void updateServos() {
   lastUpdate = now;
   if (!servoTalking) return;
   float phase = (now % SERVO_SWING_PERIOD_MS) / (float)SERVO_SWING_PERIOD_MS;
-  servoMoveBoth(SERVO_CENTER + (int)(SERVO_SWING * sinf(phase * TWO_PI)));
+  float wave = sinf(phase * TWO_PI);
+  servoWrite(SERVO2_CHANNEL, SERVO_CENTER + (int)(SERVO_SWING * wave));                  // 팬: 가운데에서 좌우로
+  servoWrite(SERVO1_CHANNEL, SERVO1_HOME + (int)(SERVO_SWING * (0.5f + 0.5f * wave)));   // 틸트: 영점(0도)에서 0 ~ SERVO_SWING도
 }
 
 bool initCamera() {
@@ -305,12 +526,18 @@ bool initMic() {
   return true;
 }
 
+void pumpIncoming();  // 아래에 있다
+
+// 큰 데이터(사진)를 보내는 동안에도 받는 쪽을 틈틈이 읽는다.
+// 안 그러면 브릿지가 노트북 소리를 안경에 보내려고 기다리고, 안경은 사진을 브릿지에 보내려고 기다리며 서로 멈춘다.
 bool sendAll(const uint8_t* data, size_t len) {
+  constexpr size_t PIECE = 1460;  // TCP 한 조각 크기
   size_t sent = 0;
   while (sent < len) {
-    size_t n = bridge.write(data + sent, len - sent);
+    size_t n = bridge.write(data + sent, min(len - sent, PIECE));
     if (n == 0) return false;
     sent += n;
+    pumpIncoming();  // 소리 프레임은 버퍼에 쌓고, 글자 줄은 큐에 둔다. (여기서는 브릿지로 아무것도 보내지 않는다)
   }
   return true;
 }
@@ -399,19 +626,98 @@ void setStreaming(bool on) {
 // 컨트롤러가 브릿지를 거쳐 보낸 줄을 읽는다: "DOWN"(버튼 누름), "UP"(버튼 뗌).
 // 컨트롤러 접속이 끊기면 브릿지가 "OFF"를 보낸다. 누른 채로 끊겼을 수 있으니 "뗌"으로 처리해서 서버가 계속 듣지 않게 한다.
 // (안경은 계속 스트리밍하므로 OFF로 스트리밍을 끄지는 않는다)
-void readControl() {
+//
+// 같은 연결로 노트북이 보낸 소리 프레임도 들어온다: [AA 55 A5 5A] [종류 1바이트] [길이 4바이트, little-endian] [데이터]
+// 종류 4(스피커 소리)면 데이터를 spkBuffer에 넣는다. 글자 줄은 0xAA로 시작하지 않아서 줄 맨 앞의 0xAA를 프레임 시작으로 본다.
+// 받은 글자 줄은 바로 처리하지 않고 큐에 둔다. 처리하다가 브릿지로 보내는 일(버튼 프레임)이 생기는데,
+// 사진을 보내는 도중에 끼어들면 프레임이 섞이기 때문이다. 큐는 runQueuedCommands()가 loop에서 비운다.
+constexpr size_t CMD_QUEUE_SIZE = 8;
+char cmdQueue[CMD_QUEUE_SIZE][sizeof(controlLine)];
+size_t cmdHead = 0;  // 다음에 넣을 자리
+size_t cmdTail = 0;  // 다음에 꺼낼 자리
+
+void queueCommand(const char* line) {
+  size_t next = (cmdHead + 1) % CMD_QUEUE_SIZE;
+  if (next == cmdTail) return;  // 가득 차면 버린다
+  strncpy(cmdQueue[cmdHead], line, sizeof(controlLine) - 1);
+  cmdQueue[cmdHead][sizeof(controlLine) - 1] = '\0';
+  cmdHead = next;
+}
+
+void runQueuedCommands() {
+  while (cmdTail != cmdHead) {
+    const char* line = cmdQueue[cmdTail];
+    if (strcmp(line, "DOWN") == 0) sendButton(1);
+    else if (strcmp(line, "UP") == 0 || strcmp(line, "OFF") == 0) sendButton(0);
+    else handleServoCommand(line);  // 서보 명령(TALK 등)도 브릿지로 받을 수 있다
+    cmdTail = (cmdTail + 1) % CMD_QUEUE_SIZE;
+  }
+}
+
+void pumpIncoming() {
+  enum { RX_LINE, RX_HEADER, RX_PAYLOAD };
+  static int state = RX_LINE;
+  static uint8_t header[HEADER_SIZE];
+  static size_t headerLen = 0;
+  static uint32_t payloadLeft = 0;
+  static uint8_t frameType = 0;
+
   while (bridge.connected() && bridge.available()) {
-    char c = bridge.read();
-    if (c == '\n') {
+    if (state == RX_PAYLOAD) {  // 데이터는 한꺼번에 읽는다
+      uint8_t buf[512];
+      int n = bridge.read(buf, min((size_t)payloadLeft, min((size_t)bridge.available(), sizeof(buf))));
+      if (n <= 0) break;
+      if (frameType == TYPE_SPEAKER && speakerReady) {
+        if (xStreamBufferSpacesAvailable(spkBuffer) >= (size_t)n) {  // 가득 차면 이번 조각은 버린다
+          xStreamBufferSend(spkBuffer, buf, n, 0);
+          statSpkBytes += n;
+        } else {
+          statSpkDropped += n;
+        }
+      }
+      payloadLeft -= n;
+      if (payloadLeft == 0) state = RX_LINE;
+      continue;
+    }
+
+    uint8_t c = bridge.read();
+    if (state == RX_HEADER) {
+      header[headerLen++] = c;
+      if (headerLen <= 4 && c != FRAME_MAGIC[headerLen - 1]) {  // 프레임이 아니었다
+        state = RX_LINE;
+        continue;
+      }
+      if (headerLen == HEADER_SIZE) {
+        frameType = header[4];
+        uint32_t len = header[5] | (header[6] << 8) | (header[7] << 16) | ((uint32_t)header[8] << 24);
+        if (len == 0 || len > MAX_RX_PAYLOAD) {
+          state = RX_LINE;  // 이상한 길이는 버리고 다시 맞춘다
+        } else {
+          payloadLeft = len;
+          state = RX_PAYLOAD;
+        }
+      }
+      continue;
+    }
+
+    if (c == FRAME_MAGIC[0] && controlLen == 0) {  // 소리 프레임의 시작일 수 있다
+      header[0] = c;
+      headerLen = 1;
+      state = RX_HEADER;
+    } else if (c == '\n') {
       controlLine[controlLen] = '\0';
-      if (strcmp(controlLine, "DOWN") == 0) sendButton(1);
-      else if (strcmp(controlLine, "UP") == 0 || strcmp(controlLine, "OFF") == 0) sendButton(0);
-      else handleServoCommand(controlLine);  // 서보 명령(TALK 등)도 브릿지로 받을 수 있다
+      queueCommand(controlLine);
       controlLen = 0;
     } else if (c != '\r' && controlLen < sizeof(controlLine) - 1) {
       controlLine[controlLen++] = c;
     }
   }
+}
+
+// loop에서 부르는 함수: 들어온 것을 읽고, 쌓인 글자 명령을 처리한다.
+void readControl() {
+  pumpIncoming();
+  runQueuedCommands();
 }
 
 void setup() {
@@ -424,6 +730,7 @@ void setup() {
   cameraReady = initCamera();
   lastCameraTryMs = millis();
   micReady = initMic();
+  speakerReady = initSpeaker();  // 마이크 I2S를 먼저 잡은 뒤에 스피커 I2S를 만든다
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);         // 전송 지연을 줄이기 위해 절전 끔
@@ -447,12 +754,13 @@ void setup() {
 void printStats() {
   if (millis() - lastStatsMs < STATS_INTERVAL_MS) return;
   lastStatsMs = millis();
-  Serial.printf("[stats 10s] wifi=%s rssi=%d | mic read %lu B (ok~320000) dropped %lu B | audio sent %lu chunks (ok~100) | frames sent %lu failed %lu max %lums | bridge connects %lu\n",
+  Serial.printf("[stats 10s] wifi=%s rssi=%d | mic read %lu B (ok~320000) dropped %lu B | audio sent %lu chunks (ok~100) | frames sent %lu failed %lu max %lums | bridge connects %lu | spk recv %lu B dropped %lu B\n",
                 WiFi.status() == WL_CONNECTED ? "on" : "off", WiFi.RSSI(),
                 (unsigned long)statMicBytes, (unsigned long)statMicDropped, (unsigned long)statAudioSent,
                 (unsigned long)statFramesSent, (unsigned long)statFramesFailed, (unsigned long)statMaxFrameMs,
-                (unsigned long)statBridgeConnects);
-  statMicBytes = statMicDropped = 0;
+                (unsigned long)statBridgeConnects,
+                (unsigned long)statSpkBytes, (unsigned long)statSpkDropped);
+  statMicBytes = statMicDropped = statSpkBytes = statSpkDropped = 0;
   statAudioSent = statFramesSent = statFramesFailed = statMaxFrameMs = statBridgeConnects = 0;
 }
 

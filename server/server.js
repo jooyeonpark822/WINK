@@ -47,10 +47,12 @@ if (wakeEnabled) {
 }
 
 // ---- 소리 -> 호출어 -> Gemini ----
+let bridge = null; // startBridgeSerial의 결과. 아래에서 채운다. (Gemini 대답 소리를 안경 스피커로 보낼 때 쓴다)
 const session = createVoiceSession({
   apiKey: GEMINI_API_KEY,
   wake,
   emit,
+  onSpeakerAudio: (pcm) => { if (bridge) bridge.sendAudio(pcm); }, // Gemini 대답 소리 -> 안경 스피커
   minSpeechRms: process.env.VAD_RMS ? Number(process.env.VAD_RMS) : undefined,
 });
 
@@ -61,7 +63,7 @@ const dumpFile = process.env.WINK_DUMP ? fs.createWriteStream(path.join(__dirnam
 const collector = createCollector({ onChange: (s) => emit('collect', s) });
 
 // ---- 브릿지 보드 (USB 시리얼) ----
-startBridgeSerial({
+bridge = startBridgeSerial({
   portPath: process.env.SERIAL_PORT || undefined,
   debug: !!process.env.WINK_DEBUG,
   // 녹음 중에는 소리를 파일에만 모으고, 호출어 감지/Gemini로는 보내지 않는다
@@ -132,7 +134,7 @@ const server = http.createServer((req, res) => {
       let answer = '';
       try {
         // 글로 물어볼 때도 같은 대화 기록을 쓰고, 주고받은 내용을 기록에 남긴다
-        await askGemini(GEMINI_API_KEY, { text, search: true, history: history.recent() }, { onOutputText: (t) => { answer += t; } });
+        await askGemini(GEMINI_API_KEY, { text, search: true, history: history.recent() }, { onOutputText: (t) => { answer += t; }, onOutputAudio: (pcm) => { if (bridge) bridge.sendAudio(pcm); } });
         const item = history.add(text, answer);
         if (item) emit('history', item);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
