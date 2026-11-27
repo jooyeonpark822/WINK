@@ -151,9 +151,9 @@ function scalePcm(pcm, gain) {
 }
 
 // 글로 물어보기: 같은 대화 기록을 쓰고, 대답 소리는 안경 스피커로 보내고, 주고받은 내용을 기록에 남긴다
-async function askAndSpeak(text, hint, gain = 1) {
+async function askAndSpeak(text, hint, gain = 1, image = null) {
   let answer = '';
-  await askGemini(GEMINI_API_KEY, { text, hint, search: true, history: history.recent() }, { onOutputText: (t) => { answer += t; }, onOutputAudio: (pcm) => { if (bridge) bridge.sendAudio(gain === 1 ? pcm : scalePcm(pcm, gain)); } });
+  await askGemini(GEMINI_API_KEY, { text, hint, image, search: true, history: history.recent() }, { onOutputText: (t) => { answer += t; }, onOutputAudio: (pcm) => { if (bridge) bridge.sendAudio(gain === 1 ? pcm : scalePcm(pcm, gain)); } });
   const item = history.add(text, answer);
   if (item) emit('history', item);
   return answer;
@@ -194,6 +194,7 @@ const SCENARIOS = {
   megi: { kind: 'gemini', prompt: WHISPER + '메기(데이트에 끼어드는 제3의 인물)와의 데이트를 나에게 귓속말로 제안하고, 수락할지는 앱에서 확인하라고 말해줘.' },
   megi_yes: { kind: 'gemini', prompt: WHISPER + '메기와의 데이트를 수락했어. 짧게 응원해줘.' },
   megi_no: { kind: 'gemini', prompt: WHISPER + '메기와의 데이트를 거절했어. 짧게 한마디 해줘.' },
+  flirt: { kind: 'gemini', camera: true, prompt: WHISPER + '저 사람한테 플러팅하고 싶어.' },  // 안경 카메라가 마지막으로 찍은 사진을 함께 보낸다 (플러팅 코치 지침: flirtCoach.js)
   more: { kind: 'gemini', prompt: WHISPER + '데이트가 끝나기 직전이야. 추가 데이트를 할지 나에게 한 문장으로 물어봐줘.' },
 };
 
@@ -279,7 +280,7 @@ const server = http.createServer((req, res) => {
       return json(200, { ok: true, text: sc.label });
     }
     if (session.getState() !== 'idle') return json(409, { ok: false, error: 'WINK가 듣거나 답하는 중이에요. 끝난 뒤에 눌러 주세요.' });
-    askAndSpeak(sc.prompt, WHISPER_TONE, WHISPER_GAIN).then((answer) => json(200, { ok: true, text: answer })).catch((err) => json(502, { ok: false, error: err.message }));
+    askAndSpeak(sc.prompt, WHISPER_TONE, WHISPER_GAIN, sc.camera ? session.getFrame() : null).then((answer) => json(200, { ok: true, text: answer })).catch((err) => json(502, { ok: false, error: err.message }));
     return;
   }
 

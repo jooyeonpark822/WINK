@@ -3,6 +3,7 @@
 const { buildPersonaText } = require('./personas'); // 상대(남)와 사용자(여) 페르소나 묶음 (server/personas.js)
 const { buildCoachingText } = require('./coaching');
 const winkPersonas = require('./winkPersonas'); // 윙맨 성격 3종 (목소리와 말투)
+const { buildFlirtText } = require('./flirtCoach'); // 눈앞의 사람에게 플러팅하고 싶을 때의 코칭 지침
 const MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
 const ENDPOINT =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
@@ -69,6 +70,7 @@ function speechConfigFor(input = {}) {
 
 function buildSystemText(input = {}) {
   let text = SYSTEM_INSTRUCTION + buildPersonaText() + buildCoachingText(); // 두 사람 페르소나 (server/personas.js) + 소개팅 코칭 규칙과 측정 데이터 (server/coaching.js)
+  text += buildFlirtText(); // 플러팅 코치 지침 (카메라 이미지와 함께 쓴다)
   text += winkPersonas.buildStyleText(input.persona || winkPersonas.getCurrent()); // 선택한 윙맨 성격의 말투 (input.persona로 미리듣기 때 바꿔 쓴다)
   if (input.hint) text += ` ${input.hint}`;
   if (input.history && input.history.length) {
