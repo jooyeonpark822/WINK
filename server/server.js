@@ -2,6 +2,7 @@
 // 결과는 웹 화면(http://localhost:3000)에 글자와 소리로 보여준다.
 // 실행: node server.js   (포트: PORT=3000)
 // 글자로 시험: curl -X POST localhost:3000/ask -H "Content-Type: application/json" --data-binary @질문.json
+const winkPersonas = require('./winkPersonas'); // 윙맨 성격 3종 (목소리와 말투)
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -163,7 +164,7 @@ async function askAndSpeak(text, hint, gain = 1) {
 // kind 'motor': 안경에 눈 화면이 아직 없어서 모터/삑 소리로 대신 표현한다. run()이 true를 돌려주면 성공
 const SCENE_DEG = 5;  // 시나리오별 버튼에서 머리(팬·틸트)가 움직이는 폭. 약간씩만
 // 귓속말 톤: 목소리 말투는 지침(hint)으로 알려 준다. 시나리오별 버튼의 말하는 대답에 쓴다
-const WHISPER_TONE = '지금은 상대 몰래 사용자 귀에만 들리게 하는 조용한 귓속말 상황이야. 평소 목소리 그대로 자연스럽고 차분하게, 조금 낮고 부드럽게 말해. 속삭이는 소리나 숨소리를 억지로 내지 말고, 또렷한 발음은 그대로 유지해.';
+const WHISPER_TONE = '지금은 상대 몰래 사용자 귀에만 들리게 하는 귓속말 상황이야. 소리 크기는 내가 따로 줄여 줄 테니 속삭이거나 숨소리를 내지 말고, 목소리 톤, 말투, 성격, 억양은 위에서 정한 윙맨 성격 그대로 자연스럽게 말해.';
 const WHISPER_GAIN = 0.45;  // 귓속말 대답은 소리를 이 비율로 줄여서 안경 스피커로 보낸다 (1이면 그대로)
 const WHISPER = '귓속말하듯 짧게, 두 문장 안으로 말해줘. ';
 const SCENARIOS = {
@@ -245,6 +246,26 @@ const server = http.createServer((req, res) => {
     else if (!runMotor(action)) { status = 400; error = `알 수 없는 동작입니다: ${action}`; }
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify(error ? { ok: false, error } : { ok: true, action }));
+  }
+
+  // 윙맨 성격: GET /persona (목록과 지금 선택), POST /persona?id=cool|soft|witty (선택), POST /persona/preview?id=... (예시 대사를 그 목소리로 안경 스피커에 들려주기)
+  if (url === '/persona' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ current: winkPersonas.getCurrent().id, list: winkPersonas.list() }));
+  }
+  if ((url === '/persona' || url === '/persona/preview') && req.method === 'POST') {
+    const id = new URL(req.url, 'http://x').searchParams.get('id');
+    const p = winkPersonas.get(id);
+    const json = (status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
+    if (!p) return json(400, { ok: false, error: '알 수 없는 성격입니다.' });
+    if (url === '/persona') { winkPersonas.setCurrent(id); return json(200, { ok: true, current: id }); }
+    if (!bridgeStatus.serial) return json(409, { ok: false, error: '브릿지 보드가 연결되지 않았습니다. (소리는 안경 스피커로 나와요)' });
+    if (session.getState() !== 'idle') return json(409, { ok: false, error: 'WINK가 듣거나 답하는 중이에요. 끝난 뒤에 눌러 주세요.' });
+    // 대화 기록에는 남기지 않는다. 고른 성격이 아니라 미리 듣는 성격의 목소리와 말투를 쓴다
+    askGemini(GEMINI_API_KEY, { text: `다음 문장을 한 글자도 바꾸지 말고 그대로 한 번만 말해줘: ${p.line}`, persona: p }, { onOutputAudio: (pcm) => { if (bridge) bridge.sendAudio(pcm); } })
+      .then(() => json(200, { ok: true, line: p.line }))
+      .catch((err) => json(502, { ok: false, error: err.message }));
+    return;
   }
 
   // 시나리오별 버튼: POST /scenario?id=playlist|charm|...  (SCENARIOS 참고)

@@ -2,6 +2,7 @@
 // API 키는 서버 쪽에서만 쓴다. (브라우저로는 절대 나가지 않는다)
 const { buildPersonaText } = require('./personas'); // 상대(남)와 사용자(여) 페르소나 묶음 (server/personas.js)
 const { buildCoachingText } = require('./coaching');
+const winkPersonas = require('./winkPersonas'); // 윙맨 성격 3종 (목소리와 말투)
 const MODEL = 'models/gemini-2.5-flash-native-audio-preview-12-2025';
 const ENDPOINT =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
@@ -60,8 +61,15 @@ const SYSTEM_INSTRUCTION =
 // Gemini 연결은 대화마다 새로 열기 때문에, 이전 대화를 기억하게 하려면 매번 기록을 함께 알려줘야 한다.
 // input.hint: 모드 설명 (없으면 생략)
 // input.history: [{ user: '내가 한 말', wink: 'WINK의 답' }, ...] 오래된 것부터 (없으면 생략)
+// 한국어로 말하고, 선택한 윙맨 성격의 목소리를 쓴다
+function speechConfigFor(input = {}) {
+  const p = input.persona || winkPersonas.getCurrent();
+  return { languageCode: 'ko-KR', voiceConfig: { prebuiltVoiceConfig: { voiceName: p.voice } } };
+}
+
 function buildSystemText(input = {}) {
   let text = SYSTEM_INSTRUCTION + buildPersonaText() + buildCoachingText(); // 두 사람 페르소나 (server/personas.js) + 소개팅 코칭 규칙과 측정 데이터 (server/coaching.js)
+  text += winkPersonas.buildStyleText(input.persona || winkPersonas.getCurrent()); // 선택한 윙맨 성격의 말투 (input.persona로 미리듣기 때 바꿔 쓴다)
   if (input.hint) text += ` ${input.hint}`;
   if (input.history && input.history.length) {
     const lines = input.history.map((h) => `사용자: ${h.user}\nWINK: ${h.wink}`).join('\n');
@@ -100,7 +108,7 @@ function askGemini(apiKey, input, handlers = {}) {
         model: MODEL,
         // 이 모델은 소리로만 답한다. 화면에 글자로도 보여주려고 음성 받아쓰기(transcription)를 켠다.
         // speechConfig.languageCode: 사용자가 한국어로 말한다고 미리 알려서 알아듣는 정확도를 높인다.
-        generationConfig: { responseModalities: ['AUDIO'], speechConfig: { languageCode: 'ko-KR' } },
+        generationConfig: { responseModalities: ['AUDIO'], speechConfig: speechConfigFor(input) },
         systemInstruction: { parts: [{ text: buildSystemText(input) }] },
         inputAudioTranscription: {},
         outputAudioTranscription: {},
@@ -212,7 +220,7 @@ function startLiveTurn(apiKey, input, handlers = {}) {
     send({
       setup: {
         model: MODEL,
-        generationConfig: { responseModalities: ['AUDIO'], speechConfig: { languageCode: 'ko-KR' } },
+        generationConfig: { responseModalities: ['AUDIO'], speechConfig: speechConfigFor(input) },
         systemInstruction: { parts: [{ text: buildSystemText(input) }] },
         inputAudioTranscription: {},
         outputAudioTranscription: {},

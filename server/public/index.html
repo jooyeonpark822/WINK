@@ -55,6 +55,14 @@
   #scenes .btns { display: flex; gap: 8px; flex-wrap: wrap; }
   #scenes .hint { font-size: 12px; color: #888; margin-top: 4px; }
   #scenes .result { margin-top: 12px; white-space: pre-wrap; }
+  #persona { margin-top: 28px; padding: 14px; border: 1px solid #ccc; border-radius: 8px; }
+  #persona h2 { margin: 0 0 4px; font-size: 16px; }
+  #persona .cards { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  #persona .card { flex: 1 1 140px; padding: 10px; border: 2px solid #ddd; border-radius: 10px; background: #fff; text-align: center; cursor: pointer; font: inherit; }
+  #persona .card.picked { border-color: #e8509a; background: #fbe6f0; }
+  #persona .card .v { display: block; font-size: 12px; color: #888; margin-top: 2px; }
+  #persona .line { margin: 10px 0; padding: 10px 12px; background: #fff; border-radius: 8px; border: 1px solid #eee; }
+  #persona .btns { display: flex; gap: 8px; flex-wrap: wrap; }
   #servo-test { margin-top: 28px; padding: 14px; border: 1px solid #ccc; border-radius: 8px; }
   #servo-test h2 { margin: 0 0 4px; font-size: 16px; }
   #servo-test h3 { margin: 14px 0 6px; font-size: 14px; color: #555; }
@@ -106,6 +114,18 @@
     </form>
     <div class="box" id="out">응답이 여기에 나옵니다.</div>
   </details>
+
+  <div id="persona">
+    <h2>윙맨의 보이스톤과 성격 (시험용)</h2>
+    <div class="small">성격을 고르고 "목소리 들어보기"를 누르면 안경 스피커로 예시 대사가 나와요. "이 목소리로 할게요"를 누르면 이후 대답(음성 대화, 글자 질문, 시나리오별 버튼)에 적용돼요.</div>
+    <div class="cards" id="persona-cards"></div>
+    <div class="line" id="persona-line">성격을 골라 주세요.</div>
+    <div class="btns">
+      <button type="button" id="persona-preview">목소리 들어보기</button>
+      <button type="button" id="persona-apply">이 목소리로 할게요</button>
+    </div>
+    <div class="small" id="persona-info" style="margin-top:8px">지금 적용 중: 불러오는 중...</div>
+  </div>
 
   <div id="servo-test">
     <h2>모터 움직여 보기 (시험용)</h2>
@@ -388,6 +408,53 @@ document.querySelectorAll('#scenes button[data-scene]').forEach((b) => {
     }
   };
 });
+
+// ---- 윙맨 성격 ----
+(async () => {
+  const cards = $('persona-cards');
+  let list = [], current = null, picked = null;
+  const nameOf = (id) => (list.find((p) => p.id === id) || {}).name || id;
+  const draw = () => {
+    cards.innerHTML = '';
+    list.forEach((p) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'card' + (p.id === picked ? ' picked' : '');
+      b.innerHTML = '<b></b><span class="v"></span>';
+      b.querySelector('b').textContent = p.name;
+      b.querySelector('.v').textContent = '목소리: ' + p.voice;
+      b.onclick = () => { picked = p.id; $('persona-line').textContent = '"' + p.line + '"'; draw(); };
+      cards.appendChild(b);
+    });
+    $('persona-info').textContent = '지금 적용 중: ' + nameOf(current);
+  };
+  const call = async (path) => {
+    const r = await fetch(path, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    return data;
+  };
+  try {
+    const data = await (await fetch('/persona')).json();
+    list = data.list; current = data.current; picked = current;
+    draw();
+    const p = list.find((x) => x.id === picked);
+    if (p) $('persona-line').textContent = '"' + p.line + '"';
+  } catch (e) { $('persona-info').textContent = '오류: ' + e.message; return; }
+  $('persona-preview').onclick = async () => {
+    if (!picked) return;
+    $('persona-preview').disabled = true;
+    $('persona-info').textContent = '들려주는 중...';
+    try { await call('/persona/preview?id=' + picked); $('persona-info').textContent = '지금 적용 중: ' + nameOf(current); }
+    catch (e) { $('persona-info').textContent = '오류: ' + e.message; }
+    finally { $('persona-preview').disabled = false; }
+  };
+  $('persona-apply').onclick = async () => {
+    if (!picked) return;
+    try { await call('/persona?id=' + picked); current = picked; draw(); $('persona-info').textContent = '지금 적용 중: ' + nameOf(current) + ' (적용됐어요)'; }
+    catch (e) { $('persona-info').textContent = '오류: ' + e.message; }
+  };
+})();
 </script>
 </body>
 </html>
